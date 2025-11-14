@@ -5,6 +5,12 @@ use worker::*;
 
 #[event(fetch)]
 async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
+    let path = req.path();
+
+    if path == "/.well-known/oauth-authorization-server" {
+        return Response::error("OAuth not supported", 404);
+    }
+
     let blockchain_url = env
         .var("BLOCKCHAIN_URL")
         .map(|v| v.to_string())
