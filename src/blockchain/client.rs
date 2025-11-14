@@ -35,7 +35,10 @@ impl BlockchainClient {
     }
 
     #[tracing::instrument(skip(self), fields(source=%req.source, dest=%req.destination, symbol=%req.symbol))]
-    pub async fn create_transfer_blob(&self, req: TransferRequest) -> Result<UnsignedTransactionBlob> {
+    pub async fn create_transfer_blob(
+        &self,
+        req: TransferRequest,
+    ) -> Result<UnsignedTransactionBlob> {
         debug!("creating transfer blob");
 
         let payload = json!({
@@ -76,8 +79,6 @@ impl BlockchainClient {
 
         let path = format!("/api/wallet/balance_all/{}", address);
         let response = self.retry_request("GET", &path, None).await?;
-
-        // Parse the Amadeus API response format
         let api_response: serde_json::Value = self.parse_response(response).await?;
 
         if api_response.get("error").and_then(|e| e.as_str()) != Some("ok") {
@@ -86,12 +87,14 @@ impl BlockchainClient {
             });
         }
 
-        let balances_data = api_response
-            .get("balances")
-            .ok_or_else(|| BlockchainError::InvalidResponse("missing balances field".to_string()))?;
+        let balances_data = api_response.get("balances").ok_or_else(|| {
+            BlockchainError::InvalidResponse("missing balances field".to_string())
+        })?;
 
-        let balances: Vec<Balance> = serde_json::from_value(balances_data.clone())
-            .map_err(|e| BlockchainError::InvalidResponse(format!("failed to parse balances: {}", e)))?;
+        let balances: Vec<Balance> =
+            serde_json::from_value(balances_data.clone()).map_err(|e| {
+                BlockchainError::InvalidResponse(format!("failed to parse balances: {}", e))
+            })?;
 
         Ok(AccountBalance {
             address: address.to_string(),
@@ -138,8 +141,9 @@ impl BlockchainClient {
             .get("entries")
             .ok_or_else(|| BlockchainError::InvalidResponse("missing entries field".to_string()))?;
 
-        serde_json::from_value(entries.clone())
-            .map_err(|e| BlockchainError::InvalidResponse(format!("failed to parse entries: {}", e)))
+        serde_json::from_value(entries.clone()).map_err(|e| {
+            BlockchainError::InvalidResponse(format!("failed to parse entries: {}", e))
+        })
     }
 
     #[tracing::instrument(skip(self), fields(tx_hash=%tx_hash))]
@@ -156,11 +160,9 @@ impl BlockchainClient {
             ));
         }
 
-        let transaction = api_response
-            .get("transaction")
-            .ok_or_else(|| {
-                BlockchainError::InvalidResponse("missing transaction field".to_string())
-            })?;
+        let transaction = api_response.get("transaction").ok_or_else(|| {
+            BlockchainError::InvalidResponse("missing transaction field".to_string())
+        })?;
 
         serde_json::from_value(transaction.clone()).map_err(|e| {
             BlockchainError::InvalidResponse(format!("failed to parse transaction: {}", e))
@@ -221,9 +223,9 @@ impl BlockchainClient {
             ));
         }
 
-        let trainers = api_response
-            .get("trainers")
-            .ok_or_else(|| BlockchainError::InvalidResponse("missing trainers field".to_string()))?;
+        let trainers = api_response.get("trainers").ok_or_else(|| {
+            BlockchainError::InvalidResponse("missing trainers field".to_string())
+        })?;
 
         serde_json::from_value(trainers.clone()).map_err(|e| {
             BlockchainError::InvalidResponse(format!("failed to parse trainers: {}", e))
@@ -250,9 +252,7 @@ impl BlockchainClient {
         path: &str,
         body: Option<&serde_json::Value>,
     ) -> Result<Response> {
-        let retry_strategy = ExponentialBackoff::from_millis(100)
-            .map(jitter)
-            .take(3);
+        let retry_strategy = ExponentialBackoff::from_millis(100).map(jitter).take(3);
 
         let url = format!("{}{}", self.base_url, path);
 
@@ -260,7 +260,12 @@ impl BlockchainClient {
             let mut request = match method {
                 "GET" => self.client.get(&url),
                 "POST" => self.client.post(&url),
-                _ => return Err(BlockchainError::Configuration(format!("unsupported method: {}", method))),
+                _ => {
+                    return Err(BlockchainError::Configuration(format!(
+                        "unsupported method: {}",
+                        method
+                    )))
+                }
             };
 
             if let Some(key) = &self.api_key {
@@ -295,7 +300,10 @@ impl BlockchainClient {
         })
     }
 
-    async fn parse_response<T: serde::de::DeserializeOwned>(&self, response: Response) -> Result<T> {
+    async fn parse_response<T: serde::de::DeserializeOwned>(
+        &self,
+        response: Response,
+    ) -> Result<T> {
         let status = response.status();
         let body = response
             .text()

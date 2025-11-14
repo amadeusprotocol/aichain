@@ -58,8 +58,6 @@ pub struct Balance {
     pub float: f64,
 }
 
-// View tool types for querying blockchain data
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct HeightQuery {
     pub height: u64,

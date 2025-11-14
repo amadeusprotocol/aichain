@@ -1,5 +1,5 @@
-use crate::BlockchainClient;
 use crate::blockchain::*;
+use crate::BlockchainClient;
 use serde_json::{json, Value};
 use worker::*;
 
@@ -148,146 +148,104 @@ async fn handle_mcp_request(client: &BlockchainClient, request: Value) -> Value 
             match tool_name {
                 "create_transfer" => {
                     match serde_json::from_value::<TransferRequest>(arguments.clone()) {
-                        Ok(req) => match client.create_transfer_blob(req).await {
-                            Ok(blob) => Ok(json!({
-                                "content": [{
-                                    "type": "text",
-                                    "text": serde_json::to_string_pretty(&json!({
-                                        "blob": blob.blob,
-                                        "signing_payload": blob.signing_payload,
-                                        "transaction_hash": blob.transaction_hash,
-                                        "status": "unsigned"
-                                    })).unwrap()
-                                }]
-                            })),
-                            Err(e) => Err(error_response(&format!("blockchain error: {}", e)))
-                        },
-                        Err(e) => Err(error_response(&format!("invalid arguments: {}", e)))
+                        Ok(req) => client
+                            .create_transfer_blob(req)
+                            .await
+                            .map(|blob| {
+                                success_response(&json!({
+                                    "blob": blob.blob,
+                                    "signing_payload": blob.signing_payload,
+                                    "transaction_hash": blob.transaction_hash,
+                                    "status": "unsigned"
+                                }))
+                            })
+                            .map_err(|e| error_response(&format!("blockchain error: {}", e))),
+                        Err(e) => Err(error_response(&format!("invalid arguments: {}", e))),
                     }
                 }
                 "submit_transaction" => {
                     match serde_json::from_value::<SignedTransaction>(arguments.clone()) {
-                        Ok(tx) => match client.submit_signed_transaction(tx).await {
-                            Ok(resp) => Ok(json!({
-                                "content": [{
-                                    "type": "text",
-                                    "text": serde_json::to_string_pretty(&resp).unwrap()
-                                }]
-                            })),
-                            Err(e) => Err(error_response(&format!("blockchain error: {}", e)))
-                        },
-                        Err(e) => Err(error_response(&format!("invalid arguments: {}", e)))
+                        Ok(tx) => client
+                            .submit_signed_transaction(tx)
+                            .await
+                            .map(|resp| success_response(&resp))
+                            .map_err(|e| error_response(&format!("blockchain error: {}", e))),
+                        Err(e) => Err(error_response(&format!("invalid arguments: {}", e))),
                     }
                 }
-                "get_account_balance" => {
-                    match arguments["address"].as_str() {
-                        Some(address) => match client.get_account_balance(address).await {
-                            Ok(balance) => Ok(json!({
-                                "content": [{
-                                    "type": "text",
-                                    "text": serde_json::to_string_pretty(&balance).unwrap()
-                                }]
-                            })),
-                            Err(e) => Err(error_response(&format!("blockchain error: {}", e)))
-                        },
-                        None => Err(error_response("missing address parameter"))
+                "get_account_balance" => match arguments["address"].as_str() {
+                    Some(address) => client
+                        .get_account_balance(address)
+                        .await
+                        .map(|balance| success_response(&balance))
+                        .map_err(|e| error_response(&format!("blockchain error: {}", e))),
+                    None => Err(error_response("missing address parameter")),
+                },
+                "get_chain_stats" => client
+                    .get_chain_stats()
+                    .await
+                    .map(|stats| success_response(&stats))
+                    .map_err(|e| error_response(&format!("blockchain error: {}", e))),
+                "get_block_by_height" => match arguments["height"].as_u64() {
+                    Some(height) => client
+                        .get_block_by_height(height)
+                        .await
+                        .map(|entries| success_response(&entries))
+                        .map_err(|e| error_response(&format!("blockchain error: {}", e))),
+                    None => Err(error_response("missing or invalid height parameter")),
+                },
+                "get_transaction" => match arguments["tx_hash"].as_str() {
+                    Some(hash) => client
+                        .get_transaction(hash)
+                        .await
+                        .map(|tx| success_response(&tx))
+                        .map_err(|e| error_response(&format!("blockchain error: {}", e))),
+                    None => Err(error_response("missing tx_hash parameter")),
+                },
+                "get_transaction_history" => match arguments["address"].as_str() {
+                    Some(address) => {
+                        let limit = arguments["limit"].as_u64().map(|v| v as u32);
+                        let offset = arguments["offset"].as_u64().map(|v| v as u32);
+                        let sort = arguments["sort"].as_str();
+                        client
+                            .get_transaction_history(address, limit, offset, sort)
+                            .await
+                            .map(|txs| success_response(&txs))
+                            .map_err(|e| error_response(&format!("blockchain error: {}", e)))
                     }
-                }
-                "get_chain_stats" => {
-                    match client.get_chain_stats().await {
-                        Ok(stats) => Ok(json!({
-                            "content": [{
-                                "type": "text",
-                                "text": serde_json::to_string_pretty(&stats).unwrap()
-                            }]
-                        })),
-                        Err(e) => Err(error_response(&format!("blockchain error: {}", e)))
-                    }
-                }
-                "get_block_by_height" => {
-                    match arguments["height"].as_u64() {
-                        Some(height) => match client.get_block_by_height(height).await {
-                            Ok(entries) => Ok(json!({
-                                "content": [{
-                                    "type": "text",
-                                    "text": serde_json::to_string_pretty(&entries).unwrap()
-                                }]
-                            })),
-                            Err(e) => Err(error_response(&format!("blockchain error: {}", e)))
-                        },
-                        None => Err(error_response("missing or invalid height parameter"))
-                    }
-                }
-                "get_transaction" => {
-                    match arguments["tx_hash"].as_str() {
-                        Some(hash) => match client.get_transaction(hash).await {
-                            Ok(tx) => Ok(json!({
-                                "content": [{
-                                    "type": "text",
-                                    "text": serde_json::to_string_pretty(&tx).unwrap()
-                                }]
-                            })),
-                            Err(e) => Err(error_response(&format!("blockchain error: {}", e)))
-                        },
-                        None => Err(error_response("missing tx_hash parameter"))
-                    }
-                }
-                "get_transaction_history" => {
-                    match arguments["address"].as_str() {
-                        Some(address) => {
-                            let limit = arguments["limit"].as_u64().map(|v| v as u32);
-                            let offset = arguments["offset"].as_u64().map(|v| v as u32);
-                            let sort = arguments["sort"].as_str();
-
-                            match client.get_transaction_history(address, limit, offset, sort).await {
-                                Ok(txs) => Ok(json!({
-                                    "content": [{
-                                        "type": "text",
-                                        "text": serde_json::to_string_pretty(&txs).unwrap()
-                                    }]
-                                })),
-                                Err(e) => Err(error_response(&format!("blockchain error: {}", e)))
-                            }
-                        },
-                        None => Err(error_response("missing address parameter"))
-                    }
-                }
-                "get_validators" => {
-                    match client.get_validators().await {
-                        Ok(validators) => Ok(json!({
-                            "content": [{
-                                "type": "text",
-                                "text": serde_json::to_string_pretty(&json!({
-                                    "validators": validators,
-                                    "count": validators.len()
-                                })).unwrap()
-                            }]
-                        })),
-                        Err(e) => Err(error_response(&format!("blockchain error: {}", e)))
-                    }
-                }
-                "get_contract_state" => {
-                    match (arguments["contract_address"].as_str(), arguments["key"].as_str()) {
-                        (Some(addr), Some(key)) => match client.get_contract_state(addr, key).await {
-                            Ok(state) => Ok(json!({
-                                "content": [{
-                                    "type": "text",
-                                    "text": serde_json::to_string_pretty(&json!({
-                                        "contract_address": addr,
-                                        "key": key,
-                                        "value": state
-                                    })).unwrap()
-                                }]
-                            })),
-                            Err(e) => Err(error_response(&format!("blockchain error: {}", e)))
-                        },
-                        _ => Err(error_response("missing contract_address or key parameter"))
-                    }
-                }
-                _ => Err(error_response("unknown tool"))
+                    None => Err(error_response("missing address parameter")),
+                },
+                "get_validators" => client
+                    .get_validators()
+                    .await
+                    .map(|validators| {
+                        success_response(&json!({
+                            "validators": validators,
+                            "count": validators.len()
+                        }))
+                    })
+                    .map_err(|e| error_response(&format!("blockchain error: {}", e))),
+                "get_contract_state" => match (
+                    arguments["contract_address"].as_str(),
+                    arguments["key"].as_str(),
+                ) {
+                    (Some(addr), Some(key)) => client
+                        .get_contract_state(addr, key)
+                        .await
+                        .map(|state| {
+                            success_response(&json!({
+                                "contract_address": addr,
+                                "key": key,
+                                "value": state
+                            }))
+                        })
+                        .map_err(|e| error_response(&format!("blockchain error: {}", e))),
+                    _ => Err(error_response("missing contract_address or key parameter")),
+                },
+                _ => Err(error_response("unknown tool")),
             }
         }
-        _ => Err(error_response("unknown method"))
+        _ => Err(error_response("unknown method")),
     };
 
     match result {
@@ -300,13 +258,19 @@ async fn handle_mcp_request(client: &BlockchainClient, request: Value) -> Value 
             "jsonrpc": "2.0",
             "id": id,
             "error": e
-        })
+        }),
     }
 }
 
 fn error_response(message: &str) -> Value {
+    json!({ "code": -32603, "message": message })
+}
+
+fn success_response<T: serde::Serialize>(data: &T) -> Value {
     json!({
-        "code": -32603,
-        "message": message
+        "content": [{
+            "type": "text",
+            "text": serde_json::to_string_pretty(data).unwrap()
+        }]
     })
 }

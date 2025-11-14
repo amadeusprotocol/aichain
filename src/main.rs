@@ -14,8 +14,8 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer().with_target(true))
         .init();
 
-    let blockchain_url = env::var("BLOCKCHAIN_URL")
-        .unwrap_or_else(|_| "https://nodes.amadeus.bot".to_string());
+    let blockchain_url =
+        env::var("BLOCKCHAIN_URL").unwrap_or_else(|_| "https://nodes.amadeus.bot".to_string());
     let api_key = env::var("BLOCKCHAIN_API_KEY").ok();
 
     info!(

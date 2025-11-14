@@ -1,9 +1,9 @@
 use crate::blockchain::{
-    BlockchainClient, BlockchainError, SignedTransaction, TransferRequest, AccountQuery,
-    HeightQuery, TransactionQuery, TransactionHistoryQuery, ContractStateQuery,
+    AccountQuery, BlockchainClient, BlockchainError, ContractStateQuery, HeightQuery,
+    SignedTransaction, TransactionHistoryQuery, TransactionQuery, TransferRequest,
 };
 use rmcp::{
-    handler::server::tool::{ToolRouter, Parameters},
+    handler::server::tool::{Parameters, ToolRouter},
     model::*,
     service::RequestContext,
     tool, tool_handler, tool_router, ErrorData as McpError, Json, RoleServer, ServerHandler,
@@ -90,9 +90,7 @@ impl BlockchainMcpServer {
             .await
             .map_err(|e| Self::blockchain_error("get_account_balance", e))?;
 
-        Ok(Json(serde_json::to_value(balance).map_err(|e| {
-            McpError::internal_error("serialization_error", Some(serde_json::json!({ "error": e.to_string() })))
-        })?))
+        Self::to_json(balance)
     }
 
     #[tool(
@@ -106,9 +104,7 @@ impl BlockchainMcpServer {
             .await
             .map_err(|e| Self::blockchain_error("get_chain_stats", e))?;
 
-        Ok(Json(serde_json::to_value(stats).map_err(|e| {
-            McpError::internal_error("serialization_error", Some(serde_json::json!({ "error": e.to_string() })))
-        })?))
+        Self::to_json(stats)
     }
 
     #[tool(
@@ -127,9 +123,7 @@ impl BlockchainMcpServer {
             .await
             .map_err(|e| Self::blockchain_error("get_block_by_height", e))?;
 
-        Ok(Json(serde_json::to_value(entries).map_err(|e| {
-            McpError::internal_error("serialization_error", Some(serde_json::json!({ "error": e.to_string() })))
-        })?))
+        Self::to_json(entries)
     }
 
     #[tool(
@@ -148,9 +142,7 @@ impl BlockchainMcpServer {
             .await
             .map_err(|e| Self::blockchain_error("get_transaction", e))?;
 
-        Ok(Json(serde_json::to_value(transaction).map_err(|e| {
-            McpError::internal_error("serialization_error", Some(serde_json::json!({ "error": e.to_string() })))
-        })?))
+        Self::to_json(transaction)
     }
 
     #[tool(
@@ -174,9 +166,7 @@ impl BlockchainMcpServer {
             .await
             .map_err(|e| Self::blockchain_error("get_transaction_history", e))?;
 
-        Ok(Json(serde_json::to_value(transactions).map_err(|e| {
-            McpError::internal_error("serialization_error", Some(serde_json::json!({ "error": e.to_string() })))
-        })?))
+        Self::to_json(transactions)
     }
 
     #[tool(
@@ -221,22 +211,51 @@ impl BlockchainMcpServer {
 
     fn blockchain_error(tool: &str, error: BlockchainError) -> McpError {
         error!(%error, tool, "blockchain operation failed");
-
         match error {
-            BlockchainError::AccountNotFound { address } => {
-                McpError::resource_not_found("account_not_found", Some(serde_json::json!({ "address": address })))
-            }
-            BlockchainError::InsufficientBalance { required, available } => {
-                McpError::invalid_request(
-                    "insufficient_balance",
-                    Some(serde_json::json!({ "required": required, "available": available })),
-                )
-            }
-            BlockchainError::ValidationFailed(msg) => {
-                McpError::invalid_params("validation_failed", Some(serde_json::json!({ "message": msg })))
-            }
-            e => McpError::internal_error("blockchain_error", Some(serde_json::json!({ "error": e.to_string() }))),
+            BlockchainError::AccountNotFound { address } => McpError::resource_not_found(
+                "account_not_found",
+                Some(serde_json::json!({ "address": address })),
+            ),
+            BlockchainError::InsufficientBalance {
+                required,
+                available,
+            } => McpError::invalid_request(
+                "insufficient_balance",
+                Some(serde_json::json!({ "required": required, "available": available })),
+            ),
+            BlockchainError::ValidationFailed(msg) => McpError::invalid_params(
+                "validation_failed",
+                Some(serde_json::json!({ "message": msg })),
+            ),
+            e => McpError::internal_error(
+                "blockchain_error",
+                Some(serde_json::json!({ "error": e.to_string() })),
+            ),
         }
+    }
+
+    fn to_json<T: serde::Serialize>(value: T) -> Result<Json<serde_json::Value>, McpError> {
+        Ok(Json(serde_json::to_value(value).map_err(|e| {
+            McpError::internal_error(
+                "serialization_error",
+                Some(serde_json::json!({ "error": e.to_string() })),
+            )
+        })?))
+    }
+
+    fn to_resource<T: serde::Serialize>(
+        value: T,
+        uri: &str,
+    ) -> Result<ReadResourceResult, McpError> {
+        let json_content = serde_json::to_string_pretty(&value).map_err(|e| {
+            McpError::internal_error(
+                "serialization_error",
+                Some(serde_json::json!({ "error": e.to_string() })),
+            )
+        })?;
+        Ok(ReadResourceResult {
+            contents: vec![ResourceContents::text(json_content, uri)],
+        })
     }
 }
 
@@ -274,35 +293,29 @@ impl ServerHandler for BlockchainMcpServer {
                     Prompt {
                         name: "check_balance".into(),
                         description: Some("Check account balance for a specific address".into()),
-                        arguments: Some(vec![
-                            PromptArgument {
-                                name: "address".into(),
-                                description: Some("The account address to check".into()),
-                                required: Some(true),
-                            },
-                        ]),
+                        arguments: Some(vec![PromptArgument {
+                            name: "address".into(),
+                            description: Some("The account address to check".into()),
+                            required: Some(true),
+                        }]),
                     },
                     Prompt {
                         name: "view_transaction".into(),
                         description: Some("View transaction details by hash".into()),
-                        arguments: Some(vec![
-                            PromptArgument {
-                                name: "hash".into(),
-                                description: Some("The transaction hash".into()),
-                                required: Some(true),
-                            },
-                        ]),
+                        arguments: Some(vec![PromptArgument {
+                            name: "hash".into(),
+                            description: Some("The transaction hash".into()),
+                            required: Some(true),
+                        }]),
                     },
                     Prompt {
                         name: "view_block".into(),
                         description: Some("View block details by height".into()),
-                        arguments: Some(vec![
-                            PromptArgument {
-                                name: "height".into(),
-                                description: Some("The block height".into()),
-                                required: Some(true),
-                            },
-                        ]),
+                        arguments: Some(vec![PromptArgument {
+                            name: "height".into(),
+                            description: Some("The block height".into()),
+                            required: Some(true),
+                        }]),
                     },
                     Prompt {
                         name: "blockchain_stats".into(),
@@ -442,7 +455,9 @@ impl ServerHandler for BlockchainMcpServer {
                         raw: RawResourceTemplate {
                             uri_template: "amadeus://block/{height}".into(),
                             name: "Block by Height".into(),
-                            description: Some("Retrieve blockchain entries at a specific height".into()),
+                            description: Some(
+                                "Retrieve blockchain entries at a specific height".into(),
+                            ),
                             mime_type: Some("application/json".into()),
                         },
                         annotations: None,
@@ -451,7 +466,9 @@ impl ServerHandler for BlockchainMcpServer {
                         raw: RawResourceTemplate {
                             uri_template: "amadeus://transaction/{hash}".into(),
                             name: "Transaction".into(),
-                            description: Some("Get detailed transaction information by hash".into()),
+                            description: Some(
+                                "Get detailed transaction information by hash".into(),
+                            ),
                             mime_type: Some("application/json".into()),
                         },
                         annotations: None,
@@ -478,7 +495,9 @@ impl ServerHandler for BlockchainMcpServer {
                         raw: RawResourceTemplate {
                             uri_template: "amadeus://contract/{address}/{key}".into(),
                             name: "Contract State".into(),
-                            description: Some("Query smart contract storage by address and key".into()),
+                            description: Some(
+                                "Query smart contract storage by address and key".into(),
+                            ),
                             mime_type: Some("application/json".into()),
                         },
                         annotations: None,
@@ -497,20 +516,13 @@ impl ServerHandler for BlockchainMcpServer {
         async move {
             let uri = request.uri.as_str();
 
-            // Parse the URI and route to appropriate handler
             if uri == "amadeus://chain/stats" {
                 let stats = self
                     .blockchain
                     .get_chain_stats()
                     .await
                     .map_err(|e| Self::blockchain_error("get_chain_stats", e))?;
-
-                let json_content = serde_json::to_string_pretty(&stats)
-                    .map_err(|e| McpError::internal_error("serialization_error", Some(serde_json::json!({ "error": e.to_string() }))))?;
-
-                return Ok(ReadResourceResult {
-                    contents: vec![ResourceContents::text(json_content, uri)],
-                });
+                return Self::to_resource(stats, uri);
             }
 
             if uri == "amadeus://validators" {
@@ -519,35 +531,28 @@ impl ServerHandler for BlockchainMcpServer {
                     .get_validators()
                     .await
                     .map_err(|e| Self::blockchain_error("get_validators", e))?;
-
-                let json_content = serde_json::to_string_pretty(&serde_json::json!({
-                    "validators": validators,
-                    "count": validators.len()
-                }))
-                .map_err(|e| McpError::internal_error("serialization_error", Some(serde_json::json!({ "error": e.to_string() }))))?;
-
-                return Ok(ReadResourceResult {
-                    contents: vec![ResourceContents::text(json_content, uri)],
-                });
+                return Self::to_resource(
+                    serde_json::json!({
+                        "validators": validators,
+                        "count": validators.len()
+                    }),
+                    uri,
+                );
             }
 
-            // Handle templated URIs
             if let Some(height_str) = uri.strip_prefix("amadeus://block/") {
-                let height: u64 = height_str.parse()
-                    .map_err(|_| McpError::invalid_params("invalid_height", Some(serde_json::json!({ "message": "Height must be a valid number" }))))?;
-
+                let height: u64 = height_str.parse().map_err(|_| {
+                    McpError::invalid_params(
+                        "invalid_height",
+                        Some(serde_json::json!({ "message": "Height must be a valid number" })),
+                    )
+                })?;
                 let entries = self
                     .blockchain
                     .get_block_by_height(height)
                     .await
                     .map_err(|e| Self::blockchain_error("get_block_by_height", e))?;
-
-                let json_content = serde_json::to_string_pretty(&entries)
-                    .map_err(|e| McpError::internal_error("serialization_error", Some(serde_json::json!({ "error": e.to_string() }))))?;
-
-                return Ok(ReadResourceResult {
-                    contents: vec![ResourceContents::text(json_content, uri)],
-                });
+                return Self::to_resource(entries, uri);
             }
 
             if let Some(hash) = uri.strip_prefix("amadeus://transaction/") {
@@ -556,13 +561,7 @@ impl ServerHandler for BlockchainMcpServer {
                     .get_transaction(hash)
                     .await
                     .map_err(|e| Self::blockchain_error("get_transaction", e))?;
-
-                let json_content = serde_json::to_string_pretty(&transaction)
-                    .map_err(|e| McpError::internal_error("serialization_error", Some(serde_json::json!({ "error": e.to_string() }))))?;
-
-                return Ok(ReadResourceResult {
-                    contents: vec![ResourceContents::text(json_content, uri)],
-                });
+                return Self::to_resource(transaction, uri);
             }
 
             if let Some(remainder) = uri.strip_prefix("amadeus://account/") {
@@ -572,13 +571,7 @@ impl ServerHandler for BlockchainMcpServer {
                         .get_account_balance(address)
                         .await
                         .map_err(|e| Self::blockchain_error("get_account_balance", e))?;
-
-                    let json_content = serde_json::to_string_pretty(&balance)
-                        .map_err(|e| McpError::internal_error("serialization_error", Some(serde_json::json!({ "error": e.to_string() }))))?;
-
-                    return Ok(ReadResourceResult {
-                        contents: vec![ResourceContents::text(json_content, uri)],
-                    });
+                    return Self::to_resource(balance, uri);
                 }
 
                 if let Some(address) = remainder.strip_suffix("/history") {
@@ -587,42 +580,34 @@ impl ServerHandler for BlockchainMcpServer {
                         .get_transaction_history(address, Some(100), None, Some("desc"))
                         .await
                         .map_err(|e| Self::blockchain_error("get_transaction_history", e))?;
-
-                    let json_content = serde_json::to_string_pretty(&transactions)
-                        .map_err(|e| McpError::internal_error("serialization_error", Some(serde_json::json!({ "error": e.to_string() }))))?;
-
-                    return Ok(ReadResourceResult {
-                        contents: vec![ResourceContents::text(json_content, uri)],
-                    });
+                    return Self::to_resource(transactions, uri);
                 }
             }
 
             if let Some(remainder) = uri.strip_prefix("amadeus://contract/") {
                 let parts: Vec<&str> = remainder.split('/').collect();
                 if parts.len() == 2 {
-                    let contract_address = parts[0];
-                    let key = parts[1];
-
+                    let (contract_address, key) = (parts[0], parts[1]);
                     let state = self
                         .blockchain
                         .get_contract_state(contract_address, key)
                         .await
                         .map_err(|e| Self::blockchain_error("get_contract_state", e))?;
-
-                    let json_content = serde_json::to_string_pretty(&serde_json::json!({
-                        "contract_address": contract_address,
-                        "key": key,
-                        "value": state
-                    }))
-                    .map_err(|e| McpError::internal_error("serialization_error", Some(serde_json::json!({ "error": e.to_string() }))))?;
-
-                    return Ok(ReadResourceResult {
-                        contents: vec![ResourceContents::text(json_content, uri)],
-                    });
+                    return Self::to_resource(
+                        serde_json::json!({
+                            "contract_address": contract_address,
+                            "key": key,
+                            "value": state
+                        }),
+                        uri,
+                    );
                 }
             }
 
-            Err(McpError::invalid_params("invalid_uri", Some(serde_json::json!({ "message": format!("Unknown resource URI: {}", uri) }))))
+            Err(McpError::invalid_params(
+                "invalid_uri",
+                Some(serde_json::json!({ "message": format!("Unknown resource URI: {}", uri) })),
+            ))
         }
     }
 }

@@ -19,7 +19,10 @@ impl BlockchainClient {
         })
     }
 
-    pub async fn create_transfer_blob(&self, req: TransferRequest) -> Result<UnsignedTransactionBlob> {
+    pub async fn create_transfer_blob(
+        &self,
+        req: TransferRequest,
+    ) -> Result<UnsignedTransactionBlob> {
         let payload = json!({
             "type": "transfer",
             "from": req.source,
@@ -29,7 +32,8 @@ impl BlockchainClient {
             "memo": req.memo,
         });
 
-        self.request("POST", "/api/v1/tx/build", Some(&payload)).await
+        self.request("POST", "/api/v1/tx/build", Some(&payload))
+            .await
     }
 
     pub async fn submit_signed_transaction(&self, tx: SignedTransaction) -> Result<SubmitResponse> {
@@ -38,7 +42,8 @@ impl BlockchainClient {
             "signature": tx.signature,
         });
 
-        self.request("POST", "/api/v1/tx/submit", Some(&payload)).await
+        self.request("POST", "/api/v1/tx/submit", Some(&payload))
+            .await
     }
 
     pub async fn get_account_balance(&self, address: &str) -> Result<AccountBalance> {
@@ -51,12 +56,14 @@ impl BlockchainClient {
             });
         }
 
-        let balances_data = api_response
-            .get("balances")
-            .ok_or_else(|| BlockchainError::InvalidResponse("missing balances field".to_string()))?;
+        let balances_data = api_response.get("balances").ok_or_else(|| {
+            BlockchainError::InvalidResponse("missing balances field".to_string())
+        })?;
 
-        let balances: Vec<Balance> = serde_json::from_value(balances_data.clone())
-            .map_err(|e| BlockchainError::InvalidResponse(format!("failed to parse balances: {}", e)))?;
+        let balances: Vec<Balance> =
+            serde_json::from_value(balances_data.clone()).map_err(|e| {
+                BlockchainError::InvalidResponse(format!("failed to parse balances: {}", e))
+            })?;
 
         Ok(AccountBalance {
             address: address.to_string(),
@@ -95,8 +102,9 @@ impl BlockchainClient {
             .get("entries")
             .ok_or_else(|| BlockchainError::InvalidResponse("missing entries field".to_string()))?;
 
-        serde_json::from_value(entries.clone())
-            .map_err(|e| BlockchainError::InvalidResponse(format!("failed to parse entries: {}", e)))
+        serde_json::from_value(entries.clone()).map_err(|e| {
+            BlockchainError::InvalidResponse(format!("failed to parse entries: {}", e))
+        })
     }
 
     pub async fn get_transaction(&self, tx_hash: &str) -> Result<Transaction> {
@@ -109,11 +117,9 @@ impl BlockchainClient {
             ));
         }
 
-        let transaction = api_response
-            .get("transaction")
-            .ok_or_else(|| {
-                BlockchainError::InvalidResponse("missing transaction field".to_string())
-            })?;
+        let transaction = api_response.get("transaction").ok_or_else(|| {
+            BlockchainError::InvalidResponse("missing transaction field".to_string())
+        })?;
 
         serde_json::from_value(transaction.clone()).map_err(|e| {
             BlockchainError::InvalidResponse(format!("failed to parse transaction: {}", e))
@@ -156,7 +162,8 @@ impl BlockchainClient {
     }
 
     pub async fn get_validators(&self) -> Result<Vec<String>> {
-        let api_response: serde_json::Value = self.request("GET", "/api/peer/trainers", None).await?;
+        let api_response: serde_json::Value =
+            self.request("GET", "/api/peer/trainers", None).await?;
 
         if api_response.get("error").and_then(|e| e.as_str()) != Some("ok") {
             return Err(BlockchainError::InvalidResponse(
@@ -164,9 +171,9 @@ impl BlockchainClient {
             ));
         }
 
-        let trainers = api_response
-            .get("trainers")
-            .ok_or_else(|| BlockchainError::InvalidResponse("missing trainers field".to_string()))?;
+        let trainers = api_response.get("trainers").ok_or_else(|| {
+            BlockchainError::InvalidResponse("missing trainers field".to_string())
+        })?;
 
         serde_json::from_value(trainers.clone()).map_err(|e| {
             BlockchainError::InvalidResponse(format!("failed to parse trainers: {}", e))
@@ -191,29 +198,39 @@ impl BlockchainClient {
         let url = format!("{}{}", self.base_url, path);
 
         let mut init = RequestInit::new();
-        init.with_method(if method == "GET" { Method::Get } else { Method::Post });
+        init.with_method(if method == "GET" {
+            Method::Get
+        } else {
+            Method::Post
+        });
 
         let mut headers = worker::Headers::new();
-        headers.set("Content-Type", "application/json")
+        headers
+            .set("Content-Type", "application/json")
             .map_err(|e| BlockchainError::HttpRequestWasm(e.to_string()))?;
 
         if let Some(key) = &self.api_key {
-            headers.set("Authorization", &format!("Bearer {}", key))
+            headers
+                .set("Authorization", &format!("Bearer {}", key))
                 .map_err(|e| BlockchainError::HttpRequestWasm(e.to_string()))?;
         }
 
         init.with_headers(headers);
 
         if let Some(json) = body {
-            init.with_body(Some(serde_json::to_string(json)
-                .map_err(|e| BlockchainError::Serialization(e))?
-                .into()));
+            init.with_body(Some(
+                serde_json::to_string(json)
+                    .map_err(|e| BlockchainError::Serialization(e))?
+                    .into(),
+            ));
         }
 
         let request = Request::new_with_init(&url, &init)
             .map_err(|e| BlockchainError::HttpRequestWasm(e.to_string()))?;
 
-        let mut response = Fetch::Request(request).send().await
+        let mut response = Fetch::Request(request)
+            .send()
+            .await
             .map_err(|e| BlockchainError::HttpRequestWasm(e.to_string()))?;
 
         let status = response.status_code();
@@ -224,14 +241,13 @@ impl BlockchainClient {
             )));
         }
 
-        let text = response.text().await
+        let text = response
+            .text()
+            .await
             .map_err(|e| BlockchainError::HttpRequestWasm(e.to_string()))?;
 
         serde_json::from_str(&text).map_err(|e| {
-            BlockchainError::InvalidResponse(format!(
-                "failed to parse response: {}",
-                e
-            ))
+            BlockchainError::InvalidResponse(format!("failed to parse response: {}", e))
         })
     }
 }
