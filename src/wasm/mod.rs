@@ -220,9 +220,13 @@ async fn twilio_verify_check(env: &Env, to: &str, code: &str) -> std::result::Re
 
     let req = Request::new_with_init(&url, &init).map_err(|e| err(&e.to_string()))?;
     let mut resp = Fetch::Request(req).send().await.map_err(|e| err(&e.to_string()))?;
-    if resp.status_code() >= 400 { return Err(err("verification check failed")); }
-
     let body: Value = resp.json().await.map_err(|e| err(&e.to_string()))?;
+
+    if resp.status_code() >= 400 {
+        let message = body["message"].as_str().unwrap_or("verification check failed");
+        return Err(err(message));
+    }
+
     Ok(body["status"].as_str().unwrap_or("").to_string())
 }
 
