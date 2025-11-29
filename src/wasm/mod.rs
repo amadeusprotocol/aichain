@@ -208,7 +208,7 @@ async fn twilio_verify_send(env: &Env, to: &str) -> std::result::Result<(), Valu
 
 async fn twilio_verify_check(env: &Env, to: &str, code: &str) -> std::result::Result<String, Value> {
     let (auth, service_sid) = twilio_auth(env)?;
-    let url = format!("https://verify.twilio.com/v2/Services/{}/VerificationChecks", service_sid);
+    let url = format!("https://verify.twilio.com/v2/Services/{}/VerificationCheck", service_sid);
 
     let mut headers = Headers::new();
     headers.set("Authorization", &format!("Basic {}", auth)).map_err(|e| err(&e.to_string()))?;
