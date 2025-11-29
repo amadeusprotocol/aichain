@@ -5,26 +5,17 @@ use worker::*;
 
 #[event(fetch)]
 async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
-    let path = req.path();
-
-    if path == "/.well-known/oauth-authorization-server" {
-        return Response::error("OAuth not supported", 404);
-    }
-
     let blockchain_url = env
         .var("BLOCKCHAIN_URL")
         .map(|v| v.to_string())
         .unwrap_or_else(|_| "https://nodes.amadeus.bot".to_string());
 
-    let api_key = env.var("BLOCKCHAIN_API_KEY").ok().map(|v| v.to_string());
-
-    let client = BlockchainClient::new(blockchain_url, api_key)
+    let client = BlockchainClient::new(blockchain_url)
         .map_err(|e| format!("failed to create client: {}", e))?;
 
     if req.method() == Method::Post {
         let body: Value = req.json().await?;
-        let response = handle_mcp_request(&client, body).await;
-        Response::from_json(&response)
+        Response::from_json(&handle_mcp_request(&client, body).await)
     } else {
         Response::from_json(&json!({
             "name": "amadeus-mcp",
@@ -38,245 +29,104 @@ async fn handle_mcp_request(client: &BlockchainClient, request: Value) -> Value 
     let method = request["method"].as_str().unwrap_or("");
     let id = request.get("id").cloned();
 
-    let result = match method {
+    let result: std::result::Result<Value, Value> = match method {
         "initialize" => Ok(json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": {
-                "name": "amadeus-mcp",
-                "version": env!("CARGO_PKG_VERSION")
-            }
+            "serverInfo": { "name": "amadeus-mcp", "version": env!("CARGO_PKG_VERSION") }
         })),
-        "tools/list" => Ok(json!({
-            "tools": [
-                {
-                    "name": "create_transfer",
-                    "description": "Creates an unsigned transaction blob for transferring assets between accounts",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "symbol": { "type": "string" },
-                            "source": { "type": "string" },
-                            "destination": { "type": "string" },
-                            "amount": { "type": "string" },
-                            "memo": { "type": "string" }
-                        },
-                        "required": ["symbol", "source", "destination", "amount"]
-                    }
-                },
-                {
-                    "name": "submit_transaction",
-                    "description": "Submits a signed transaction to the blockchain network",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "transaction": { "type": "string" },
-                            "signature": { "type": "string" }
-                        },
-                        "required": ["transaction", "signature"]
-                    }
-                },
-                {
-                    "name": "get_account_balance",
-                    "description": "Queries the balance of an account across all supported assets",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "address": { "type": "string" }
-                        },
-                        "required": ["address"]
-                    }
-                },
-                {
-                    "name": "get_chain_stats",
-                    "description": "Retrieves current blockchain statistics",
-                    "inputSchema": { "type": "object", "properties": {} }
-                },
-                {
-                    "name": "get_block_by_height",
-                    "description": "Retrieves blockchain entries at a specific height",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "height": { "type": "number" }
-                        },
-                        "required": ["height"]
-                    }
-                },
-                {
-                    "name": "get_transaction",
-                    "description": "Retrieves a specific transaction by its hash",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "tx_hash": { "type": "string" }
-                        },
-                        "required": ["tx_hash"]
-                    }
-                },
-                {
-                    "name": "get_transaction_history",
-                    "description": "Retrieves transaction history for a specific account",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "address": { "type": "string" },
-                            "limit": { "type": "number" },
-                            "offset": { "type": "number" },
-                            "sort": { "type": "string" }
-                        },
-                        "required": ["address"]
-                    }
-                },
-                {
-                    "name": "get_validators",
-                    "description": "Retrieves the list of current validator nodes",
-                    "inputSchema": { "type": "object", "properties": {} }
-                },
-                {
-                    "name": "get_contract_state",
-                    "description": "Retrieves a specific value from smart contract storage",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "contract_address": { "type": "string" },
-                            "key": { "type": "string" }
-                        },
-                        "required": ["contract_address", "key"]
-                    }
-                }
-            ]
-        })),
-        "tools/call" => {
-            let tool_name = request["params"]["name"].as_str().unwrap_or("");
-            let arguments = &request["params"]["arguments"];
-
-            match tool_name {
-                "create_transfer" => {
-                    match serde_json::from_value::<TransferRequest>(arguments.clone()) {
-                        Ok(req) => client
-                            .create_transfer_blob(req)
-                            .await
-                            .map(|blob| {
-                                success_response(&json!({
-                                    "blob": blob.blob,
-                                    "signing_payload": blob.signing_payload,
-                                    "transaction_hash": blob.transaction_hash,
-                                    "status": "unsigned"
-                                }))
-                            })
-                            .map_err(|e| error_response(&format!("blockchain error: {}", e))),
-                        Err(e) => Err(error_response(&format!("invalid arguments: {}", e))),
-                    }
-                }
-                "submit_transaction" => {
-                    match serde_json::from_value::<SignedTransaction>(arguments.clone()) {
-                        Ok(tx) => client
-                            .submit_signed_transaction(tx)
-                            .await
-                            .map(|resp| success_response(&resp))
-                            .map_err(|e| error_response(&format!("blockchain error: {}", e))),
-                        Err(e) => Err(error_response(&format!("invalid arguments: {}", e))),
-                    }
-                }
-                "get_account_balance" => match arguments["address"].as_str() {
-                    Some(address) => client
-                        .get_account_balance(address)
-                        .await
-                        .map(|balance| success_response(&balance))
-                        .map_err(|e| error_response(&format!("blockchain error: {}", e))),
-                    None => Err(error_response("missing address parameter")),
-                },
-                "get_chain_stats" => client
-                    .get_chain_stats()
-                    .await
-                    .map(|stats| success_response(&stats))
-                    .map_err(|e| error_response(&format!("blockchain error: {}", e))),
-                "get_block_by_height" => match arguments["height"].as_u64() {
-                    Some(height) => client
-                        .get_block_by_height(height)
-                        .await
-                        .map(|entries| success_response(&entries))
-                        .map_err(|e| error_response(&format!("blockchain error: {}", e))),
-                    None => Err(error_response("missing or invalid height parameter")),
-                },
-                "get_transaction" => match arguments["tx_hash"].as_str() {
-                    Some(hash) => client
-                        .get_transaction(hash)
-                        .await
-                        .map(|tx| success_response(&tx))
-                        .map_err(|e| error_response(&format!("blockchain error: {}", e))),
-                    None => Err(error_response("missing tx_hash parameter")),
-                },
-                "get_transaction_history" => match arguments["address"].as_str() {
-                    Some(address) => {
-                        let limit = arguments["limit"].as_u64().map(|v| v as u32);
-                        let offset = arguments["offset"].as_u64().map(|v| v as u32);
-                        let sort = arguments["sort"].as_str();
-                        client
-                            .get_transaction_history(address, limit, offset, sort)
-                            .await
-                            .map(|txs| success_response(&txs))
-                            .map_err(|e| error_response(&format!("blockchain error: {}", e)))
-                    }
-                    None => Err(error_response("missing address parameter")),
-                },
-                "get_validators" => client
-                    .get_validators()
-                    .await
-                    .map(|validators| {
-                        success_response(&json!({
-                            "validators": validators,
-                            "count": validators.len()
-                        }))
-                    })
-                    .map_err(|e| error_response(&format!("blockchain error: {}", e))),
-                "get_contract_state" => match (
-                    arguments["contract_address"].as_str(),
-                    arguments["key"].as_str(),
-                ) {
-                    (Some(addr), Some(key)) => client
-                        .get_contract_state(addr, key)
-                        .await
-                        .map(|state| {
-                            success_response(&json!({
-                                "contract_address": addr,
-                                "key": key,
-                                "value": state
-                            }))
-                        })
-                        .map_err(|e| error_response(&format!("blockchain error: {}", e))),
-                    _ => Err(error_response("missing contract_address or key parameter")),
-                },
-                _ => Err(error_response("unknown tool")),
-            }
-        }
-        _ => Err(error_response("unknown method")),
+        "tools/list" => Ok(tools_list()),
+        "tools/call" => handle_tool_call(client, &request["params"]).await,
+        _ => Err(err("unknown method")),
     };
 
     match result {
-        Ok(r) => json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": r
-        }),
-        Err(e) => json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": e
-        }),
+        Ok(r) => json!({ "jsonrpc": "2.0", "id": id, "result": r }),
+        Err(e) => json!({ "jsonrpc": "2.0", "id": id, "error": e }),
     }
 }
 
-fn error_response(message: &str) -> Value {
-    json!({ "code": -32603, "message": message })
+async fn handle_tool_call(client: &BlockchainClient, params: &Value) -> std::result::Result<Value, Value> {
+    let tool = params["name"].as_str().unwrap_or("");
+    let args = &params["arguments"];
+
+    match tool {
+        "create_transfer" => {
+            let req: TransferRequest = serde_json::from_value(args.clone()).map_err(|e| err(&e.to_string()))?;
+            client.create_transfer_blob(req).await
+                .map(|b| ok(&json!({ "blob": b.blob, "signing_payload": b.signing_payload, "transaction_hash": b.transaction_hash, "status": "unsigned" })))
+                .map_err(|e| err(&e.to_string()))
+        }
+        "submit_transaction" => {
+            let tx: SignedTransaction = serde_json::from_value(args.clone()).map_err(|e| err(&e.to_string()))?;
+            client.submit_signed_transaction(tx).await.map(|r| ok(&r)).map_err(|e| err(&e.to_string()))
+        }
+        "get_account_balance" => {
+            let addr = args["address"].as_str().ok_or_else(|| err("missing address"))?;
+            client.get_account_balance(addr).await.map(|b| ok(&b)).map_err(|e| err(&e.to_string()))
+        }
+        "get_chain_stats" => {
+            client.get_chain_stats().await.map(|s| ok(&s)).map_err(|e| err(&e.to_string()))
+        }
+        "get_block_by_height" => {
+            let height = args["height"].as_u64().ok_or_else(|| err("missing height"))?;
+            client.get_block_by_height(height).await.map(|e| ok(&e)).map_err(|e| err(&e.to_string()))
+        }
+        "get_transaction" => {
+            let hash = args["tx_hash"].as_str().ok_or_else(|| err("missing tx_hash"))?;
+            client.get_transaction(hash).await.map(|t| ok(&t)).map_err(|e| err(&e.to_string()))
+        }
+        "get_transaction_history" => {
+            let addr = args["address"].as_str().ok_or_else(|| err("missing address"))?;
+            let limit = args["limit"].as_u64().map(|v| v as u32);
+            let offset = args["offset"].as_u64().map(|v| v as u32);
+            let sort = args["sort"].as_str();
+            client.get_transaction_history(addr, limit, offset, sort).await.map(|t| ok(&t)).map_err(|e| err(&e.to_string()))
+        }
+        "get_validators" => {
+            client.get_validators().await
+                .map(|v| ok(&json!({ "validators": v, "count": v.len() })))
+                .map_err(|e| err(&e.to_string()))
+        }
+        "get_contract_state" => {
+            let addr = args["contract_address"].as_str().ok_or_else(|| err("missing contract_address"))?;
+            let key = args["key"].as_str().ok_or_else(|| err("missing key"))?;
+            client.get_contract_state(addr, key).await
+                .map(|s| ok(&json!({ "contract_address": addr, "key": key, "value": s })))
+                .map_err(|e| err(&e.to_string()))
+        }
+        _ => Err(err("unknown tool")),
+    }
 }
 
-fn success_response<T: serde::Serialize>(data: &T) -> Value {
-    json!({
-        "content": [{
-            "type": "text",
-            "text": serde_json::to_string_pretty(data).unwrap()
-        }]
-    })
+fn tools_list() -> Value {
+    json!({ "tools": [
+        tool("create_transfer", "Creates an unsigned transaction blob for transferring assets between accounts",
+            json!({ "symbol": str_prop(), "source": str_prop(), "destination": str_prop(), "amount": str_prop(), "memo": str_prop() }),
+            vec!["symbol", "source", "destination", "amount"]),
+        tool("submit_transaction", "Submits a signed transaction to the blockchain network",
+            json!({ "transaction": str_prop(), "signature": str_prop() }), vec!["transaction", "signature"]),
+        tool("get_account_balance", "Queries the balance of an account across all supported assets",
+            json!({ "address": str_prop() }), vec!["address"]),
+        tool("get_chain_stats", "Retrieves current blockchain statistics", json!({}), vec![]),
+        tool("get_block_by_height", "Retrieves blockchain entries at a specific height",
+            json!({ "height": { "type": "number" } }), vec!["height"]),
+        tool("get_transaction", "Retrieves a specific transaction by its hash",
+            json!({ "tx_hash": str_prop() }), vec!["tx_hash"]),
+        tool("get_transaction_history", "Retrieves transaction history for a specific account",
+            json!({ "address": str_prop(), "limit": { "type": "number" }, "offset": { "type": "number" }, "sort": str_prop() }), vec!["address"]),
+        tool("get_validators", "Retrieves the list of current validator nodes", json!({}), vec![]),
+        tool("get_contract_state", "Retrieves a specific value from smart contract storage",
+            json!({ "contract_address": str_prop(), "key": str_prop() }), vec!["contract_address", "key"]),
+    ]})
+}
+
+fn tool(name: &str, desc: &str, props: Value, required: Vec<&str>) -> Value {
+    json!({ "name": name, "description": desc, "inputSchema": { "type": "object", "properties": props, "required": required }})
+}
+
+fn str_prop() -> Value { json!({ "type": "string" }) }
+fn err(msg: &str) -> Value { json!({ "code": -32603, "message": msg }) }
+fn ok<T: serde::Serialize>(data: &T) -> Value {
+    json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(data).unwrap() }] })
 }

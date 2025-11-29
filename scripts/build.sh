@@ -12,4 +12,4 @@ worker-build --release
 rm -f build/.gitignore
 
 echo "Build complete. Commit with: git add build/ && git commit -m 'Build WASM'"
-echo "Then deploy with: wrangler deploy"
+echo "Build ocmplete. Next do git commit and do wrangler deploy"

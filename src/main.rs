@@ -16,32 +16,21 @@ async fn main() -> anyhow::Result<()> {
 
     let blockchain_url =
         env::var("BLOCKCHAIN_URL").unwrap_or_else(|_| "https://nodes.amadeus.bot".to_string());
-    let api_key = env::var("BLOCKCHAIN_API_KEY").ok();
 
-    info!(
-        url = %blockchain_url,
-        has_api_key = api_key.is_some(),
-        "initializing blockchain client"
-    );
+    info!(url = %blockchain_url, "initializing blockchain client");
 
-    let client = BlockchainClient::new(blockchain_url, api_key)?;
+    let client = BlockchainClient::new(blockchain_url)?;
     let server = BlockchainMcpServer::new(client);
-
-    info!("starting MCP server on stdio transport");
 
     let service = server
         .serve(rmcp::transport::stdio())
         .await
         .map_err(|e| anyhow::anyhow!("failed to initialize server: {}", e))?;
 
-    info!("server initialized successfully");
-
     service
         .waiting()
         .await
         .map_err(|e| anyhow::anyhow!("server error: {}", e))?;
-
-    info!("server shutdown complete");
 
     Ok(())
 }

@@ -10,6 +10,7 @@ use rmcp::{
 };
 use std::{future::Future, sync::Arc};
 use tracing::error;
+use validator::Validate;
 
 #[derive(Clone)]
 pub struct BlockchainMcpServer {
@@ -35,6 +36,12 @@ impl BlockchainMcpServer {
         params: Parameters<TransferRequest>,
     ) -> Result<Json<serde_json::Value>, McpError> {
         let req = params.0;
+        req.validate().map_err(|e| {
+            McpError::invalid_params(
+                "validation_failed",
+                Some(serde_json::json!({ "errors": e })),
+            )
+        })?;
 
         let blob = self
             .blockchain
@@ -60,6 +67,12 @@ impl BlockchainMcpServer {
         params: Parameters<SignedTransaction>,
     ) -> Result<Json<serde_json::Value>, McpError> {
         let tx = params.0;
+        tx.validate().map_err(|e| {
+            McpError::invalid_params(
+                "validation_failed",
+                Some(serde_json::json!({ "errors": e })),
+            )
+        })?;
 
         let response = self
             .blockchain
@@ -83,6 +96,12 @@ impl BlockchainMcpServer {
         params: Parameters<AccountQuery>,
     ) -> Result<Json<serde_json::Value>, McpError> {
         let query = params.0;
+        query.validate().map_err(|e| {
+            McpError::invalid_params(
+                "validation_failed",
+                Some(serde_json::json!({ "errors": e })),
+            )
+        })?;
 
         let balance = self
             .blockchain
@@ -116,6 +135,12 @@ impl BlockchainMcpServer {
         params: Parameters<HeightQuery>,
     ) -> Result<Json<serde_json::Value>, McpError> {
         let query = params.0;
+        query.validate().map_err(|e| {
+            McpError::invalid_params(
+                "validation_failed",
+                Some(serde_json::json!({ "errors": e })),
+            )
+        })?;
 
         let entries = self
             .blockchain
@@ -135,6 +160,12 @@ impl BlockchainMcpServer {
         params: Parameters<TransactionQuery>,
     ) -> Result<Json<serde_json::Value>, McpError> {
         let query = params.0;
+        query.validate().map_err(|e| {
+            McpError::invalid_params(
+                "validation_failed",
+                Some(serde_json::json!({ "errors": e })),
+            )
+        })?;
 
         let transaction = self
             .blockchain
@@ -154,6 +185,12 @@ impl BlockchainMcpServer {
         params: Parameters<TransactionHistoryQuery>,
     ) -> Result<Json<serde_json::Value>, McpError> {
         let query = params.0;
+        query.validate().map_err(|e| {
+            McpError::invalid_params(
+                "validation_failed",
+                Some(serde_json::json!({ "errors": e })),
+            )
+        })?;
 
         let transactions = self
             .blockchain
@@ -195,6 +232,12 @@ impl BlockchainMcpServer {
         params: Parameters<ContractStateQuery>,
     ) -> Result<Json<serde_json::Value>, McpError> {
         let query = params.0;
+        query.validate().map_err(|e| {
+            McpError::invalid_params(
+                "validation_failed",
+                Some(serde_json::json!({ "errors": e })),
+            )
+        })?;
 
         let state = self
             .blockchain
@@ -242,21 +285,6 @@ impl BlockchainMcpServer {
             )
         })?))
     }
-
-    fn to_resource<T: serde::Serialize>(
-        value: T,
-        uri: &str,
-    ) -> Result<ReadResourceResult, McpError> {
-        let json_content = serde_json::to_string_pretty(&value).map_err(|e| {
-            McpError::internal_error(
-                "serialization_error",
-                Some(serde_json::json!({ "error": e.to_string() })),
-            )
-        })?;
-        Ok(ReadResourceResult {
-            contents: vec![ResourceContents::text(json_content, uri)],
-        })
-    }
 }
 
 #[tool_handler]
@@ -282,332 +310,61 @@ impl ServerHandler for BlockchainMcpServer {
         }
     }
 
-    fn list_prompts(
+    async fn list_prompts(
         &self,
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<ListPromptsResult, McpError>> + Send + '_ {
-        async move {
-            Ok(ListPromptsResult {
-                prompts: vec![
-                    Prompt {
-                        name: "check_balance".into(),
-                        description: Some("Check account balance for a specific address".into()),
-                        arguments: Some(vec![PromptArgument {
-                            name: "address".into(),
-                            description: Some("The account address to check".into()),
-                            required: Some(true),
-                        }]),
-                    },
-                    Prompt {
-                        name: "view_transaction".into(),
-                        description: Some("View transaction details by hash".into()),
-                        arguments: Some(vec![PromptArgument {
-                            name: "hash".into(),
-                            description: Some("The transaction hash".into()),
-                            required: Some(true),
-                        }]),
-                    },
-                    Prompt {
-                        name: "view_block".into(),
-                        description: Some("View block details by height".into()),
-                        arguments: Some(vec![PromptArgument {
-                            name: "height".into(),
-                            description: Some("The block height".into()),
-                            required: Some(true),
-                        }]),
-                    },
-                    Prompt {
-                        name: "blockchain_stats".into(),
-                        description: Some("View current blockchain statistics".into()),
-                        arguments: None,
-                    },
-                ],
-                next_cursor: None,
-            })
-        }
+    ) -> Result<ListPromptsResult, McpError> {
+        Ok(ListPromptsResult {
+            prompts: vec![],
+            next_cursor: None,
+        })
     }
 
-    fn get_prompt(
+    async fn get_prompt(
         &self,
         request: GetPromptRequestParam,
         _context: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<GetPromptResult, McpError>> + Send + '_ {
-        async move {
-            let prompt_name = request.name.as_str();
+    ) -> Result<GetPromptResult, McpError> {
+        let prompt_name = request.name.as_str();
 
-            match prompt_name {
-                "check_balance" => {
-                    let address = request.arguments.as_ref()
-                        .and_then(|args| args.get("address"))
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| McpError::invalid_params("missing_address", None))?;
-
-                    Ok(GetPromptResult {
-                        description: Some(format!("Check balance for address: {}", address)),
-                        messages: vec![
-                            PromptMessage {
-                                role: PromptMessageRole::User,
-                                content: PromptMessageContent::Text {
-                                    text: format!("Please check the balance for address {} using the get_account_balance tool or the amadeus://account/{}/balance resource", address, address),
-                                },
-                            },
-                        ],
-                    })
-                }
-                "view_transaction" => {
-                    let hash = request.arguments.as_ref()
-                        .and_then(|args| args.get("hash"))
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| McpError::invalid_params("missing_hash", None))?;
-
-                    Ok(GetPromptResult {
-                        description: Some(format!("View transaction: {}", hash)),
-                        messages: vec![
-                            PromptMessage {
-                                role: PromptMessageRole::User,
-                                content: PromptMessageContent::Text {
-                                    text: format!("Please show me the details of transaction {} using the get_transaction tool or the amadeus://transaction/{} resource", hash, hash),
-                                },
-                            },
-                        ],
-                    })
-                }
-                "view_block" => {
-                    let height = request.arguments.as_ref()
-                        .and_then(|args| args.get("height"))
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| McpError::invalid_params("missing_height", None))?;
-
-                    Ok(GetPromptResult {
-                        description: Some(format!("View block at height: {}", height)),
-                        messages: vec![
-                            PromptMessage {
-                                role: PromptMessageRole::User,
-                                content: PromptMessageContent::Text {
-                                    text: format!("Please show me the block at height {} using the get_block_by_height tool or the amadeus://block/{} resource", height, height),
-                                },
-                            },
-                        ],
-                    })
-                }
-                "blockchain_stats" => {
-                    Ok(GetPromptResult {
-                        description: Some("View current blockchain statistics".into()),
-                        messages: vec![
-                            PromptMessage {
-                                role: PromptMessageRole::User,
-                                content: PromptMessageContent::Text {
-                                    text: "Please show me the current blockchain statistics using the get_chain_stats tool or the amadeus://chain/stats resource".into(),
-                                },
-                            },
-                        ],
-                    })
-                }
-                _ => Err(McpError::invalid_params("unknown_prompt", Some(serde_json::json!({ "name": prompt_name }))))
-            }
-        }
+        Err(McpError::invalid_params(
+            "unknown_prompt",
+            Some(serde_json::json!({ "name": prompt_name })),
+        ))
     }
 
-    fn list_resources(
+    async fn list_resources(
         &self,
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<ListResourcesResult, McpError>> + Send + '_ {
-        async move {
-            Ok(ListResourcesResult {
-                resources: vec![
-                    Resource {
-                        raw: RawResource {
-                            uri: "amadeus://chain/stats".into(),
-                            name: "Blockchain Statistics".into(),
-                            description: Some("Current blockchain statistics including height, total transactions, and total accounts".into()),
-                            mime_type: Some("application/json".into()),
-                            size: None,
-                        },
-                        annotations: None,
-                    },
-                    Resource {
-                        raw: RawResource {
-                            uri: "amadeus://validators".into(),
-                            name: "Validator List".into(),
-                            description: Some("List of current validator nodes (trainers) in the network".into()),
-                            mime_type: Some("application/json".into()),
-                            size: None,
-                        },
-                        annotations: None,
-                    },
-                ],
-                next_cursor: None,
-            })
-        }
+    ) -> Result<ListResourcesResult, McpError> {
+        Ok(ListResourcesResult {
+            resources: vec![],
+            next_cursor: None,
+        })
     }
 
-    fn list_resource_templates(
+    async fn list_resource_templates(
         &self,
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<ListResourceTemplatesResult, McpError>> + Send + '_ {
-        async move {
-            Ok(ListResourceTemplatesResult {
-                resource_templates: vec![
-                    ResourceTemplate {
-                        raw: RawResourceTemplate {
-                            uri_template: "amadeus://block/{height}".into(),
-                            name: "Block by Height".into(),
-                            description: Some(
-                                "Retrieve blockchain entries at a specific height".into(),
-                            ),
-                            mime_type: Some("application/json".into()),
-                        },
-                        annotations: None,
-                    },
-                    ResourceTemplate {
-                        raw: RawResourceTemplate {
-                            uri_template: "amadeus://transaction/{hash}".into(),
-                            name: "Transaction".into(),
-                            description: Some(
-                                "Get detailed transaction information by hash".into(),
-                            ),
-                            mime_type: Some("application/json".into()),
-                        },
-                        annotations: None,
-                    },
-                    ResourceTemplate {
-                        raw: RawResourceTemplate {
-                            uri_template: "amadeus://account/{address}/balance".into(),
-                            name: "Account Balance".into(),
-                            description: Some("Query all token balances for an account".into()),
-                            mime_type: Some("application/json".into()),
-                        },
-                        annotations: None,
-                    },
-                    ResourceTemplate {
-                        raw: RawResourceTemplate {
-                            uri_template: "amadeus://account/{address}/history".into(),
-                            name: "Transaction History".into(),
-                            description: Some("Query transaction history for an account".into()),
-                            mime_type: Some("application/json".into()),
-                        },
-                        annotations: None,
-                    },
-                    ResourceTemplate {
-                        raw: RawResourceTemplate {
-                            uri_template: "amadeus://contract/{address}/{key}".into(),
-                            name: "Contract State".into(),
-                            description: Some(
-                                "Query smart contract storage by address and key".into(),
-                            ),
-                            mime_type: Some("application/json".into()),
-                        },
-                        annotations: None,
-                    },
-                ],
-                next_cursor: None,
-            })
-        }
+    ) -> Result<ListResourceTemplatesResult, McpError> {
+        Ok(ListResourceTemplatesResult {
+            resource_templates: vec![],
+            next_cursor: None,
+        })
     }
 
-    fn read_resource(
+    async fn read_resource(
         &self,
         request: ReadResourceRequestParam,
         _context: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<ReadResourceResult, McpError>> + Send + '_ {
-        async move {
-            let uri = request.uri.as_str();
-
-            if uri == "amadeus://chain/stats" {
-                let stats = self
-                    .blockchain
-                    .get_chain_stats()
-                    .await
-                    .map_err(|e| Self::blockchain_error("get_chain_stats", e))?;
-                return Self::to_resource(stats, uri);
-            }
-
-            if uri == "amadeus://validators" {
-                let validators = self
-                    .blockchain
-                    .get_validators()
-                    .await
-                    .map_err(|e| Self::blockchain_error("get_validators", e))?;
-                return Self::to_resource(
-                    serde_json::json!({
-                        "validators": validators,
-                        "count": validators.len()
-                    }),
-                    uri,
-                );
-            }
-
-            if let Some(height_str) = uri.strip_prefix("amadeus://block/") {
-                let height: u64 = height_str.parse().map_err(|_| {
-                    McpError::invalid_params(
-                        "invalid_height",
-                        Some(serde_json::json!({ "message": "Height must be a valid number" })),
-                    )
-                })?;
-                let entries = self
-                    .blockchain
-                    .get_block_by_height(height)
-                    .await
-                    .map_err(|e| Self::blockchain_error("get_block_by_height", e))?;
-                return Self::to_resource(entries, uri);
-            }
-
-            if let Some(hash) = uri.strip_prefix("amadeus://transaction/") {
-                let transaction = self
-                    .blockchain
-                    .get_transaction(hash)
-                    .await
-                    .map_err(|e| Self::blockchain_error("get_transaction", e))?;
-                return Self::to_resource(transaction, uri);
-            }
-
-            if let Some(remainder) = uri.strip_prefix("amadeus://account/") {
-                if let Some(address) = remainder.strip_suffix("/balance") {
-                    let balance = self
-                        .blockchain
-                        .get_account_balance(address)
-                        .await
-                        .map_err(|e| Self::blockchain_error("get_account_balance", e))?;
-                    return Self::to_resource(balance, uri);
-                }
-
-                if let Some(address) = remainder.strip_suffix("/history") {
-                    let transactions = self
-                        .blockchain
-                        .get_transaction_history(address, Some(100), None, Some("desc"))
-                        .await
-                        .map_err(|e| Self::blockchain_error("get_transaction_history", e))?;
-                    return Self::to_resource(transactions, uri);
-                }
-            }
-
-            if let Some(remainder) = uri.strip_prefix("amadeus://contract/") {
-                let parts: Vec<&str> = remainder.split('/').collect();
-                if parts.len() == 2 {
-                    let (contract_address, key) = (parts[0], parts[1]);
-                    let state = self
-                        .blockchain
-                        .get_contract_state(contract_address, key)
-                        .await
-                        .map_err(|e| Self::blockchain_error("get_contract_state", e))?;
-                    return Self::to_resource(
-                        serde_json::json!({
-                            "contract_address": contract_address,
-                            "key": key,
-                            "value": state
-                        }),
-                        uri,
-                    );
-                }
-            }
-
-            Err(McpError::invalid_params(
-                "invalid_uri",
-                Some(serde_json::json!({ "message": format!("Unknown resource URI: {}", uri) })),
-            ))
-        }
+    ) -> Result<ReadResourceResult, McpError> {
+        let uri = request.uri.as_str();
+        Err(McpError::invalid_params(
+            "invalid_uri",
+            Some(serde_json::json!({ "message": format!("Unknown resource URI: {}", uri) })),
+        ))
     }
 }

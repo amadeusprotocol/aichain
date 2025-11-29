@@ -1,11 +1,16 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use validator::Validate;
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 pub struct TransferRequest {
+    #[validate(length(min = 1))]
     pub symbol: String,
+    #[validate(length(min = 1))]
     pub source: String,
+    #[validate(length(min = 1))]
     pub destination: String,
+    #[validate(length(min = 1))]
     pub amount: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memo: Option<String>,
@@ -18,9 +23,11 @@ pub struct UnsignedTransactionBlob {
     pub transaction_hash: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 pub struct SignedTransaction {
+    #[validate(length(min = 1))]
     pub transaction: String,
+    #[validate(length(min = 1))]
     pub signature: String,
 }
 
@@ -38,8 +45,9 @@ pub enum TransactionStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 pub struct AccountQuery {
+    #[validate(length(min = 1))]
     pub address: String,
 }
 
@@ -58,18 +66,20 @@ pub struct Balance {
     pub float: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 pub struct HeightQuery {
     pub height: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 pub struct TransactionQuery {
+    #[validate(length(min = 1))]
     pub tx_hash: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 pub struct TransactionHistoryQuery {
+    #[validate(length(min = 1))]
     pub address: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
@@ -79,9 +89,11 @@ pub struct TransactionHistoryQuery {
     pub sort: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 pub struct ContractStateQuery {
+    #[validate(length(min = 1))]
     pub contract_address: String,
+    #[validate(length(min = 1))]
     pub key: String,
 }
 

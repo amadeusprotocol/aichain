@@ -9,17 +9,16 @@ use tokio_retry::{
     strategy::{jitter, ExponentialBackoff},
     Retry,
 };
-use tracing::{debug, warn};
+use tracing::warn;
 
 #[derive(Clone)]
 pub struct BlockchainClient {
     client: Client,
     base_url: String,
-    api_key: Option<String>,
 }
 
 impl BlockchainClient {
-    pub fn new(base_url: String, api_key: Option<String>) -> Result<Self> {
+    pub fn new(base_url: String) -> Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .pool_idle_timeout(Duration::from_secs(90))
@@ -30,7 +29,6 @@ impl BlockchainClient {
         Ok(Self {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
-            api_key,
         })
     }
 
@@ -39,8 +37,6 @@ impl BlockchainClient {
         &self,
         req: TransferRequest,
     ) -> Result<UnsignedTransactionBlob> {
-        debug!("creating transfer blob");
-
         let payload = json!({
             "type": "transfer",
             "from": req.source,
@@ -53,14 +49,11 @@ impl BlockchainClient {
         let response = self
             .retry_request("POST", "/api/v1/tx/build", Some(&payload))
             .await?;
-
         self.parse_response(response).await
     }
 
     #[tracing::instrument(skip(self, tx), fields(tx_hash))]
     pub async fn submit_signed_transaction(&self, tx: SignedTransaction) -> Result<SubmitResponse> {
-        debug!("submitting signed transaction");
-
         let payload = json!({
             "transaction": tx.transaction,
             "signature": tx.signature,
@@ -69,14 +62,11 @@ impl BlockchainClient {
         let response = self
             .retry_request("POST", "/api/v1/tx/submit", Some(&payload))
             .await?;
-
         self.parse_response(response).await
     }
 
     #[tracing::instrument(skip(self), fields(address=%address))]
     pub async fn get_account_balance(&self, address: &str) -> Result<AccountBalance> {
-        debug!("querying account balance");
-
         let path = format!("/api/wallet/balance_all/{}", address);
         let response = self.retry_request("GET", &path, None).await?;
         let api_response: serde_json::Value = self.parse_response(response).await?;
@@ -104,8 +94,6 @@ impl BlockchainClient {
 
     #[tracing::instrument(skip(self))]
     pub async fn get_chain_stats(&self) -> Result<ChainStats> {
-        debug!("querying chain statistics");
-
         let response = self.retry_request("GET", "/api/chain/stats", None).await?;
         let api_response: serde_json::Value = self.parse_response(response).await?;
 
@@ -125,8 +113,6 @@ impl BlockchainClient {
 
     #[tracing::instrument(skip(self), fields(height=%height))]
     pub async fn get_block_by_height(&self, height: u64) -> Result<Vec<BlockEntry>> {
-        debug!("querying block by height");
-
         let path = format!("/api/chain/height/{}", height);
         let response = self.retry_request("GET", &path, None).await?;
         let api_response: serde_json::Value = self.parse_response(response).await?;
@@ -148,8 +134,6 @@ impl BlockchainClient {
 
     #[tracing::instrument(skip(self), fields(tx_hash=%tx_hash))]
     pub async fn get_transaction(&self, tx_hash: &str) -> Result<Transaction> {
-        debug!("querying transaction");
-
         let path = format!("/api/chain/tx/{}", tx_hash);
         let response = self.retry_request("GET", &path, None).await?;
         let api_response: serde_json::Value = self.parse_response(response).await?;
@@ -177,8 +161,6 @@ impl BlockchainClient {
         offset: Option<u32>,
         sort: Option<&str>,
     ) -> Result<Vec<Transaction>> {
-        debug!("querying transaction history");
-
         let mut path = format!("/api/chain/tx_events_by_account/{}", address);
         let mut params = vec![];
 
@@ -193,7 +175,7 @@ impl BlockchainClient {
         }
 
         if !params.is_empty() {
-            path.push_str("?");
+            path.push('?');
             path.push_str(&params.join("&"));
         }
 
@@ -210,8 +192,6 @@ impl BlockchainClient {
 
     #[tracing::instrument(skip(self))]
     pub async fn get_validators(&self) -> Result<Vec<String>> {
-        debug!("querying validators");
-
         let response = self
             .retry_request("GET", "/api/peer/trainers", None)
             .await?;
@@ -238,11 +218,8 @@ impl BlockchainClient {
         contract_address: &str,
         key: &str,
     ) -> Result<serde_json::Value> {
-        debug!("querying contract state");
-
         let path = format!("/api/contract/get/{}/{}", contract_address, key);
         let response = self.retry_request("GET", &path, None).await?;
-
         self.parse_response(response).await
     }
 
@@ -267,10 +244,6 @@ impl BlockchainClient {
                     )))
                 }
             };
-
-            if let Some(key) = &self.api_key {
-                request = request.header(header::AUTHORIZATION, format!("Bearer {}", key));
-            }
 
             request = request.header(header::CONTENT_TYPE, "application/json");
 
