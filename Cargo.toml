@@ -32,6 +32,6 @@ anyhow = "1.0"
 rmcp = { version = "0.5", features = ["server", "macros", "transport-io"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-worker = "0.4"
+worker = { version = "0.4", features = ["d1"] }
 wasm-bindgen = "0.2"
 getrandom = { version = "0.2", features = ["js"] }

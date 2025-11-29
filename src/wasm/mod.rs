@@ -1,3 +1,5 @@
+mod mint;
+
 use crate::blockchain::*;
 use crate::BlockchainClient;
 use serde_json::{json, Value};
@@ -15,7 +17,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
     if req.method() == Method::Post {
         let body: Value = req.json().await?;
-        Response::from_json(&handle_mcp_request(&client, body).await)
+        Response::from_json(&handle_mcp_request(&client, &env, body).await)
     } else {
         Response::from_json(&json!({
             "name": "amadeus-mcp",
@@ -25,7 +27,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     }
 }
 
-async fn handle_mcp_request(client: &BlockchainClient, request: Value) -> Value {
+async fn handle_mcp_request(client: &BlockchainClient, env: &Env, request: Value) -> Value {
     let method = request["method"].as_str().unwrap_or("");
     let id = request.get("id").cloned();
 
@@ -36,7 +38,7 @@ async fn handle_mcp_request(client: &BlockchainClient, request: Value) -> Value 
             "serverInfo": { "name": "amadeus-mcp", "version": env!("CARGO_PKG_VERSION") }
         })),
         "tools/list" => Ok(tools_list()),
-        "tools/call" => handle_tool_call(client, &request["params"]).await,
+        "tools/call" => handle_tool_call(client, env, &request["params"]).await,
         _ => Err(err("unknown method")),
     };
 
@@ -46,7 +48,7 @@ async fn handle_mcp_request(client: &BlockchainClient, request: Value) -> Value 
     }
 }
 
-async fn handle_tool_call(client: &BlockchainClient, params: &Value) -> std::result::Result<Value, Value> {
+async fn handle_tool_call(client: &BlockchainClient, env: &Env, params: &Value) -> std::result::Result<Value, Value> {
     let tool = params["name"].as_str().unwrap_or("");
     let args = &params["arguments"];
 
@@ -95,6 +97,8 @@ async fn handle_tool_call(client: &BlockchainClient, params: &Value) -> std::res
                 .map(|s| ok(&json!({ "contract_address": addr, "key": key, "value": s })))
                 .map_err(|e| err(&e.to_string()))
         }
+        "faucet_create_order" => faucet_create_order(env, args).await,
+        "faucet_complete_order" => faucet_complete_order(client, env, args).await,
         _ => Err(err("unknown tool")),
     }
 }
@@ -118,6 +122,10 @@ fn tools_list() -> Value {
         tool("get_validators", "Retrieves the list of current validator nodes", json!({}), vec![]),
         tool("get_contract_state", "Retrieves a specific value from smart contract storage",
             json!({ "contract_address": str_prop(), "key": str_prop() }), vec!["contract_address", "key"]),
+        tool("faucet_create_order", "Creates a faucet order by sending OTP to phone number for verification",
+            json!({ "phone": str_prop() }), vec!["phone"]),
+        tool("faucet_complete_order", "Completes a faucet order by verifying OTP and minting testnet tokens",
+            json!({ "phone": str_prop(), "otp": str_prop(), "address": str_prop() }), vec!["phone", "otp", "address"]),
     ]})
 }
 
@@ -129,4 +137,86 @@ fn str_prop() -> Value { json!({ "type": "string" }) }
 fn err(msg: &str) -> Value { json!({ "code": -32603, "message": msg }) }
 fn ok<T: serde::Serialize>(data: &T) -> Value {
     json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(data).unwrap() }] })
+}
+
+async fn faucet_create_order(env: &Env, args: &Value) -> std::result::Result<Value, Value> {
+    let phone = args["phone"].as_str().ok_or_else(|| err("missing phone"))?;
+    let mut buf = [0u8; 6];
+    getrandom::getrandom(&mut buf).map_err(|e| err(&e.to_string()))?;
+    let otp: String = buf.iter().map(|b| ((b % 10) + b'0') as char).collect();
+
+    let db = env.d1("MCP_DATABASE").map_err(|e| err(&e.to_string()))?;
+    db.prepare("INSERT OR REPLACE INTO otp_requests (phone, otp) VALUES (?1, ?2)")
+        .bind(&[phone.into(), otp.as_str().into()]).map_err(|e| err(&e.to_string()))?
+        .run().await.map_err(|e| err(&e.to_string()))?;
+
+    send_sms(env, phone, &format!("Your Amadeus faucet code: {}", otp)).await?;
+    Ok(ok(&json!({ "status": "success", "message": "OTP sent" })))
+}
+
+async fn faucet_complete_order(_client: &BlockchainClient, env: &Env, args: &Value) -> std::result::Result<Value, Value> {
+    let phone = args["phone"].as_str().ok_or_else(|| err("missing phone"))?;
+    let otp = args["otp"].as_str().ok_or_else(|| err("missing otp"))?;
+    let address = args["address"].as_str().ok_or_else(|| err("missing address"))?;
+
+    let db = env.d1("MCP_DATABASE").map_err(|e| err(&e.to_string()))?;
+    let row = db.prepare("SELECT otp FROM otp_requests WHERE phone = ?1")
+        .bind(&[phone.into()]).map_err(|e| err(&e.to_string()))?
+        .first::<String>(Some("otp")).await.map_err(|e| err(&e.to_string()))?;
+
+    let stored_otp = row.ok_or_else(|| err("no pending order for this phone"))?;
+    if stored_otp != otp { return Err(err("invalid OTP")); }
+
+    let tx_hash = mint::mint_tokens(env, address).await?;
+
+    db.prepare("DELETE FROM otp_requests WHERE phone = ?1").bind(&[phone.into()]).map_err(|e| err(&e.to_string()))?
+        .run().await.map_err(|e| err(&e.to_string()))?;
+    db.prepare("INSERT INTO faucet_orders (phone, address) VALUES (?1, ?2)")
+        .bind(&[phone.into(), address.into()]).map_err(|e| err(&e.to_string()))?
+        .run().await.map_err(|e| err(&e.to_string()))?;
+
+    Ok(ok(&json!({ "status": "success", "message": "tokens minted", "tx_hash": tx_hash })))
+}
+
+async fn send_sms(env: &Env, to: &str, body: &str) -> std::result::Result<(), Value> {
+    let sid = env.var("TWILIO_ACCOUNT_SID").map(|v| v.to_string()).map_err(|_| err("twilio not configured"))?;
+    let token = env.var("TWILIO_AUTH_TOKEN").map(|v| v.to_string()).map_err(|_| err("twilio not configured"))?;
+    let from = env.var("TWILIO_FROM_PHONE").map(|v| v.to_string()).map_err(|_| err("twilio not configured"))?;
+
+    let url = format!("https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json", sid);
+    let auth = base64_encode(&format!("{}:{}", sid, token));
+    let form = format!("To={}&From={}&Body={}", urlenc(to), urlenc(&from), urlenc(body));
+
+    let mut headers = Headers::new();
+    headers.set("Authorization", &format!("Basic {}", auth)).map_err(|e| err(&e.to_string()))?;
+    headers.set("Content-Type", "application/x-www-form-urlencoded").map_err(|e| err(&e.to_string()))?;
+
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post).with_headers(headers).with_body(Some(form.into()));
+    let req = Request::new_with_init(&url, &init).map_err(|e| err(&e.to_string()))?;
+    let resp = Fetch::Request(req).send().await.map_err(|e| err(&e.to_string()))?;
+
+    if resp.status_code() >= 400 { return Err(err("failed to send SMS")); }
+    Ok(())
+}
+
+fn base64_encode(s: &str) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes = s.as_bytes();
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [chunk.get(0).copied().unwrap_or(0), chunk.get(1).copied().unwrap_or(0), chunk.get(2).copied().unwrap_or(0)];
+        out.push(CHARS[(b[0] >> 2) as usize] as char);
+        out.push(CHARS[((b[0] & 3) << 4 | b[1] >> 4) as usize] as char);
+        out.push(if chunk.len() > 1 { CHARS[((b[1] & 15) << 2 | b[2] >> 6) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { CHARS[(b[2] & 63) as usize] as char } else { '=' });
+    }
+    out
+}
+
+fn urlenc(s: &str) -> String {
+    s.chars().map(|c| match c {
+        'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
+        _ => format!("%{:02X}", c as u8),
+    }).collect()
 }
