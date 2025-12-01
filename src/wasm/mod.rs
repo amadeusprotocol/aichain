@@ -137,22 +137,22 @@ fn ok<T: serde::Serialize>(data: &T) -> Value {
     json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(data).unwrap() }] })
 }
 
-const CLAIM_COOLDOWN_SECS: i64 = 86400;
+const CLAIM_COOLDOWN_SECS: f64 = 86400.0;
 
 async fn claim_testnet_ama(env: &Env, client_ip: Option<String>, args: &Value) -> std::result::Result<Value, Value> {
     let ip = client_ip.ok_or_else(|| err("could not determine client IP"))?;
     let address = args["address"].as_str().ok_or_else(|| err("missing address"))?;
-    let now = Date::now().as_millis() as i64 / 1000;
+    let now = (Date::now().as_millis() / 1000) as f64;
 
     let db = env.d1("MCP_DATABASE").map_err(|e| err(&e.to_string()))?;
-    let existing: Option<i64> = db.prepare("SELECT claimed_at FROM faucet_claims WHERE ip = ?1")
+    let existing: Option<f64> = db.prepare("SELECT claimed_at FROM faucet_claims WHERE ip = ?1")
         .bind(&[ip.clone().into()]).map_err(|e| err(&e.to_string()))?
         .first(Some("claimed_at")).await.map_err(|e| err(&e.to_string()))?;
 
     if let Some(claimed_at) = existing {
         let elapsed = now - claimed_at;
         if elapsed < CLAIM_COOLDOWN_SECS {
-            let remaining = CLAIM_COOLDOWN_SECS - elapsed;
+            let remaining = (CLAIM_COOLDOWN_SECS - elapsed) as i64;
             let hours = remaining / 3600;
             let minutes = (remaining % 3600) / 60;
             return Err(err(&format!("can only claim once per day, wait {}h {}m", hours, minutes)));
