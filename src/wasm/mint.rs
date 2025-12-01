@@ -1,9 +1,8 @@
 use super::tx;
 use serde_json::{json, Value};
-use sha2::Digest;
 use worker::Env;
 
-const FAUCET_AMOUNT: i128 = 100_000_000_000;
+const FAUCET_AMOUNT: i128 = 10_000_000_000;
 const FAUCET_SYMBOL: &str = "AMA";
 
 pub async fn transfer(env: &Env, address: &str) -> Result<String, Value> {
@@ -27,23 +26,23 @@ pub async fn transfer(env: &Env, address: &str) -> Result<String, Value> {
         return Err(err("address must be 48 bytes"));
     }
 
-    let tx_packed =
-        tx::build_transfer_tx(&sk, &receiver, FAUCET_SYMBOL, FAUCET_AMOUNT).map_err(err)?;
-    let tx_b58 = bs58::encode(&tx_packed).into_string();
-    let tx_hash = hex::encode(&sha2::Sha256::digest(&tx_packed)[..16]);
+    let built = tx::build_transfer_tx(&sk, &receiver, FAUCET_SYMBOL, FAUCET_AMOUNT).map_err(err)?;
+    let tx_b58 = bs58::encode(&built.packed).into_string();
+    let tx_hash = bs58::encode(&built.hash).into_string();
 
     let url = format!("{}/api/tx/submit/{}", rpc.trim_end_matches('/'), tx_b58);
-    let resp = worker::Fetch::Url(worker::Url::parse(&url).map_err(|e| err(&e.to_string()))?)
+    let mut resp = worker::Fetch::Url(worker::Url::parse(&url).map_err(|e| err(&e.to_string()))?)
         .send()
         .await
         .map_err(|e| err(&e.to_string()))?;
 
-    let status = resp.status_code();
-    if status < 200 || status >= 300 {
-        return Err(err(&format!("submit failed: {}", status)));
-    }
-
-    Ok(tx_hash)
+    let body = resp.text().await.map_err(|e| err(&e.to_string()))?;
+    Ok(format!(
+        "status={} tx_hash={} body={}",
+        resp.status_code(),
+        tx_hash,
+        body
+    ))
 }
 
 fn err(msg: &str) -> Value {

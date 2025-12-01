@@ -6,8 +6,10 @@ const DST_TX: &[u8] = b"AMADEUS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_TX_";
 mod args_serde {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     pub fn serialize<S: Serializer>(args: &[Vec<u8>], ser: S) -> Result<S::Ok, S::Error> {
-        let v: Vec<serde_bytes::ByteBuf> =
-            args.iter().map(|a| serde_bytes::ByteBuf::from(a.clone())).collect();
+        let v: Vec<serde_bytes::ByteBuf> = args
+            .iter()
+            .map(|a| serde_bytes::ByteBuf::from(a.clone()))
+            .collect();
         v.serialize(ser)
     }
     pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Vec<Vec<u8>>, D::Error> {
@@ -74,6 +76,11 @@ fn sign(sk_bytes: &[u8], message: &[u8], dst: &[u8]) -> Result<Vec<u8>, &'static
     Ok(sig.to_bytes().to_vec())
 }
 
+pub struct BuiltTx {
+    pub packed: Vec<u8>,
+    pub hash: [u8; 32],
+}
+
 pub fn build(
     sk_bytes: &[u8],
     contract: &str,
@@ -81,7 +88,7 @@ pub fn build(
     args: &[Vec<u8>],
     attached_symbol: Option<&[u8]>,
     attached_amount: Option<&[u8]>,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<BuiltTx, &'static str> {
     let pk = get_public_key(sk_bytes)?;
     let nonce = js_sys::Date::now() as i128 * 1_000_000;
 
@@ -94,22 +101,34 @@ pub fn build(
         attached_amount: attached_amount.map(|a| a.to_vec()),
     };
 
-    let tx = Tx { signer: pk, nonce, action };
+    let tx = Tx {
+        signer: pk,
+        nonce,
+        action,
+    };
     let tx_encoded = vecpak::to_vec(&tx).map_err(|_| "failed to encode tx")?;
     let hash: [u8; 32] = Sha256::digest(&tx_encoded).into();
     let signature = sign(sk_bytes, &hash, DST_TX)?;
 
-    let txu = TxU { hash: hash.to_vec(), signature, tx };
-    vecpak::to_vec(&txu).map_err(|_| "failed to encode txu")
+    let txu = TxU {
+        hash: hash.to_vec(),
+        signature,
+        tx,
+    };
+    let packed = vecpak::to_vec(&txu).map_err(|_| "failed to encode txu")?;
+    Ok(BuiltTx { packed, hash })
 }
 
 #[allow(dead_code)]
-pub fn build_mint_tx(sk_bytes: &[u8], symbol: &str, amount: i128) -> Result<Vec<u8>, &'static str> {
+pub fn build_mint_tx(sk_bytes: &[u8], symbol: &str, amount: i128) -> Result<BuiltTx, &'static str> {
     build(
         sk_bytes,
         "Coin",
         "mint",
-        &[symbol.as_bytes().to_vec(), amount.to_string().as_bytes().to_vec()],
+        &[
+            symbol.as_bytes().to_vec(),
+            amount.to_string().as_bytes().to_vec(),
+        ],
         None,
         None,
     )
@@ -120,7 +139,7 @@ pub fn build_transfer_tx(
     receiver: &[u8],
     symbol: &str,
     amount: i128,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<BuiltTx, &'static str> {
     build(
         sk_bytes,
         "Coin",

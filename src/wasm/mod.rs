@@ -29,7 +29,12 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     }
 }
 
-async fn handle_mcp_request(client: &BlockchainClient, env: &Env, client_ip: Option<String>, request: Value) -> Value {
+async fn handle_mcp_request(
+    client: &BlockchainClient,
+    env: &Env,
+    client_ip: Option<String>,
+    request: Value,
+) -> Value {
     let method = request["method"].as_str().unwrap_or("");
     let id = request.get("id").cloned();
 
@@ -50,52 +55,93 @@ async fn handle_mcp_request(client: &BlockchainClient, env: &Env, client_ip: Opt
     }
 }
 
-async fn handle_tool_call(client: &BlockchainClient, env: &Env, client_ip: Option<String>, params: &Value) -> std::result::Result<Value, Value> {
+async fn handle_tool_call(
+    client: &BlockchainClient,
+    env: &Env,
+    client_ip: Option<String>,
+    params: &Value,
+) -> std::result::Result<Value, Value> {
     let tool = params["name"].as_str().unwrap_or("");
     let args = &params["arguments"];
 
     match tool {
         "create_transfer" => {
-            let req: TransferRequest = serde_json::from_value(args.clone()).map_err(|e| err(&e.to_string()))?;
+            let req: TransferRequest =
+                serde_json::from_value(args.clone()).map_err(|e| err(&e.to_string()))?;
             client.create_transfer_blob(req).await
                 .map(|b| ok(&json!({ "blob": b.blob, "signing_payload": b.signing_payload, "transaction_hash": b.transaction_hash, "status": "unsigned" })))
                 .map_err(|e| err(&e.to_string()))
         }
         "submit_transaction" => {
-            let tx: SignedTransaction = serde_json::from_value(args.clone()).map_err(|e| err(&e.to_string()))?;
-            client.submit_signed_transaction(tx).await.map(|r| ok(&r)).map_err(|e| err(&e.to_string()))
+            let tx: SignedTransaction =
+                serde_json::from_value(args.clone()).map_err(|e| err(&e.to_string()))?;
+            client
+                .submit_signed_transaction(tx)
+                .await
+                .map(|r| ok(&r))
+                .map_err(|e| err(&e.to_string()))
         }
         "get_account_balance" => {
-            let addr = args["address"].as_str().ok_or_else(|| err("missing address"))?;
-            client.get_account_balance(addr).await.map(|b| ok(&b)).map_err(|e| err(&e.to_string()))
+            let addr = args["address"]
+                .as_str()
+                .ok_or_else(|| err("missing address"))?;
+            client
+                .get_account_balance(addr)
+                .await
+                .map(|b| ok(&b))
+                .map_err(|e| err(&e.to_string()))
         }
-        "get_chain_stats" => {
-            client.get_chain_stats().await.map(|s| ok(&s)).map_err(|e| err(&e.to_string()))
-        }
+        "get_chain_stats" => client
+            .get_chain_stats()
+            .await
+            .map(|s| ok(&s))
+            .map_err(|e| err(&e.to_string())),
         "get_block_by_height" => {
-            let height = args["height"].as_u64().ok_or_else(|| err("missing height"))?;
-            client.get_block_by_height(height).await.map(|e| ok(&e)).map_err(|e| err(&e.to_string()))
+            let height = args["height"]
+                .as_u64()
+                .ok_or_else(|| err("missing height"))?;
+            client
+                .get_block_by_height(height)
+                .await
+                .map(|e| ok(&e))
+                .map_err(|e| err(&e.to_string()))
         }
         "get_transaction" => {
-            let hash = args["tx_hash"].as_str().ok_or_else(|| err("missing tx_hash"))?;
-            client.get_transaction(hash).await.map(|t| ok(&t)).map_err(|e| err(&e.to_string()))
+            let hash = args["tx_hash"]
+                .as_str()
+                .ok_or_else(|| err("missing tx_hash"))?;
+            client
+                .get_transaction(hash)
+                .await
+                .map(|t| ok(&t))
+                .map_err(|e| err(&e.to_string()))
         }
         "get_transaction_history" => {
-            let addr = args["address"].as_str().ok_or_else(|| err("missing address"))?;
+            let addr = args["address"]
+                .as_str()
+                .ok_or_else(|| err("missing address"))?;
             let limit = args["limit"].as_u64().map(|v| v as u32);
             let offset = args["offset"].as_u64().map(|v| v as u32);
             let sort = args["sort"].as_str();
-            client.get_transaction_history(addr, limit, offset, sort).await.map(|t| ok(&t)).map_err(|e| err(&e.to_string()))
-        }
-        "get_validators" => {
-            client.get_validators().await
-                .map(|v| ok(&json!({ "validators": v, "count": v.len() })))
+            client
+                .get_transaction_history(addr, limit, offset, sort)
+                .await
+                .map(|t| ok(&t))
                 .map_err(|e| err(&e.to_string()))
         }
+        "get_validators" => client
+            .get_validators()
+            .await
+            .map(|v| ok(&json!({ "validators": v, "count": v.len() })))
+            .map_err(|e| err(&e.to_string())),
         "get_contract_state" => {
-            let addr = args["contract_address"].as_str().ok_or_else(|| err("missing contract_address"))?;
+            let addr = args["contract_address"]
+                .as_str()
+                .ok_or_else(|| err("missing contract_address"))?;
             let key = args["key"].as_str().ok_or_else(|| err("missing key"))?;
-            client.get_contract_state(addr, key).await
+            client
+                .get_contract_state(addr, key)
+                .await
                 .map(|s| ok(&json!({ "contract_address": addr, "key": key, "value": s })))
                 .map_err(|e| err(&e.to_string()))
         }
@@ -132,23 +178,37 @@ fn tool(name: &str, desc: &str, props: Value, required: Vec<&str>) -> Value {
     json!({ "name": name, "description": desc, "inputSchema": { "type": "object", "properties": props, "required": required }})
 }
 
-fn str_prop() -> Value { json!({ "type": "string" }) }
-fn err(msg: &str) -> Value { json!({ "code": -32603, "message": msg }) }
+fn str_prop() -> Value {
+    json!({ "type": "string" })
+}
+fn err(msg: &str) -> Value {
+    json!({ "code": -32603, "message": msg })
+}
 fn ok<T: serde::Serialize>(data: &T) -> Value {
     json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(data).unwrap() }] })
 }
 
 const CLAIM_COOLDOWN_SECS: f64 = 86400.0;
 
-async fn claim_testnet_ama(env: &Env, client_ip: Option<String>, args: &Value) -> std::result::Result<Value, Value> {
+async fn claim_testnet_ama(
+    env: &Env,
+    client_ip: Option<String>,
+    args: &Value,
+) -> std::result::Result<Value, Value> {
     let ip = client_ip.ok_or_else(|| err("could not determine client IP"))?;
-    let address = args["address"].as_str().ok_or_else(|| err("missing address"))?;
+    let address = args["address"]
+        .as_str()
+        .ok_or_else(|| err("missing address"))?;
     let now = (Date::now().as_millis() / 1000) as f64;
 
     let db = env.d1("MCP_DATABASE").map_err(|e| err(&e.to_string()))?;
-    let existing: Option<f64> = db.prepare("SELECT claimed_at FROM faucet_claims WHERE ip = ?1")
-        .bind(&[ip.clone().into()]).map_err(|e| err(&e.to_string()))?
-        .first(Some("claimed_at")).await.map_err(|e| err(&e.to_string()))?;
+    let existing: Option<f64> = db
+        .prepare("SELECT claimed_at FROM faucet_claims WHERE ip = ?1")
+        .bind(&[ip.clone().into()])
+        .map_err(|e| err(&e.to_string()))?
+        .first(Some("claimed_at"))
+        .await
+        .map_err(|e| err(&e.to_string()))?;
 
     if let Some(claimed_at) = existing {
         let elapsed = now - claimed_at;
@@ -156,17 +216,30 @@ async fn claim_testnet_ama(env: &Env, client_ip: Option<String>, args: &Value) -
             let remaining = (CLAIM_COOLDOWN_SECS - elapsed) as i64;
             let hours = remaining / 3600;
             let minutes = (remaining % 3600) / 60;
-            return Err(err(&format!("can only claim once per day, wait {}h {}m", hours, minutes)));
+            return Err(err(&format!(
+                "can only claim once per day, wait {}h {}m",
+                hours, minutes
+            )));
         }
-        db.prepare("UPDATE faucet_claims SET claimed_at = ?1, address = ?2 WHERE ip = ?3")
-            .bind(&[now.into(), address.into(), ip.into()]).map_err(|e| err(&e.to_string()))?
-            .run().await.map_err(|e| err(&e.to_string()))?;
-    } else {
-        db.prepare("INSERT INTO faucet_claims (ip, address, claimed_at) VALUES (?1, ?2, ?3)")
-            .bind(&[ip.into(), address.into(), now.into()]).map_err(|e| err(&e.to_string()))?
-            .run().await.map_err(|e| err(&e.to_string()))?;
     }
 
     let tx_hash = mint::transfer(env, address).await?;
+
+    if existing.is_some() {
+        db.prepare("UPDATE faucet_claims SET claimed_at = ?1, address = ?2 WHERE ip = ?3")
+            .bind(&[now.into(), address.into(), ip.into()])
+            .map_err(|e| err(&e.to_string()))?
+            .run()
+            .await
+            .map_err(|e| err(&e.to_string()))?;
+    } else {
+        db.prepare("INSERT INTO faucet_claims (ip, address, claimed_at) VALUES (?1, ?2, ?3)")
+            .bind(&[ip.into(), address.into(), now.into()])
+            .map_err(|e| err(&e.to_string()))?
+            .run()
+            .await
+            .map_err(|e| err(&e.to_string()))?;
+    }
+
     Ok(ok(&json!({ "status": "success", "tx_hash": tx_hash })))
 }
