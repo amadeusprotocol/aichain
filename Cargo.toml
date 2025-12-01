@@ -35,3 +35,12 @@ rmcp = { version = "0.5", features = ["server", "macros", "transport-io"] }
 worker = { version = "0.4", features = ["d1"] }
 wasm-bindgen = "0.2"
 getrandom = { version = "0.2", features = ["js"] }
+sha2 = "0.10"
+serde_bytes = "0.11"
+js-sys = "0.3"
+bls12_381 = "0.8"
+blst = { version = "0.3", default-features = false, features = ["portable"] }
+group = "0.13"
+bs58 = "0.5"
+hex = "0.4"
+vecpak = { git = "https://github.com/amadeusprotocol/chain", package = "vecpak" }

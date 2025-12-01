@@ -1,4 +1,5 @@
 mod mint;
+mod tx;
 
 use crate::blockchain::*;
 use crate::BlockchainClient;
@@ -166,6 +167,6 @@ async fn claim_testnet_ama(env: &Env, client_ip: Option<String>, args: &Value) -
             .run().await.map_err(|e| err(&e.to_string()))?;
     }
 
-    let tx_hash = mint::mint_tokens(env, address).await?;
+    let tx_hash = mint::transfer(env, address).await?;
     Ok(ok(&json!({ "status": "success", "tx_hash": tx_hash })))
 }

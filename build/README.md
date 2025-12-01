@@ -96,7 +96,7 @@ wrangler secret put BLOCKCHAIN_API_KEY
 ```bash
 BLOCKCHAIN_URL=https://nodes.amadeus.bot
 AMADEUS_TESTNET_RPC=https://nodes.amadeus.bot
-AMADEUS_TESTNET_MINT_KEY (secret)
+AMADEUS_TESTNET_SK (secret, base58-encoded 64-byte key)
 MCP_DATABASE (D1 binding)
 ```
 
