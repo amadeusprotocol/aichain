@@ -514,7 +514,13 @@ async fn claim_testnet_ama(
     headers: HashMap<String, String>,
     args: &Value,
 ) -> std::result::Result<Value, Value> {
-    let ip = client_ip.ok_or_else(|| err("could not determine client IP"))?;
+    // Try headers in order: x-forwarded-for, cf-connecting-ip, x-real-ip, then fallback to client_ip
+    let ip = headers.get("x-forwarded-for")
+        .and_then(|v| v.split(',').next().map(|s| s.trim().to_string()))
+        .or_else(|| headers.get("cf-connecting-ip").cloned())
+        .or_else(|| headers.get("x-real-ip").cloned())
+        .or(client_ip)
+        .ok_or_else(|| err("could not determine client IP"))?;
     let address = args["address"]
         .as_str()
         .ok_or_else(|| err("missing address"))?;
