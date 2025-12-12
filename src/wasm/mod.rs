@@ -253,7 +253,7 @@ fn serve_faucet_page() -> Result<Response> {
             result.className = 'result';
 
             try {
-                const response = await fetch('https://amadeus-mcp.faychuk.workers.dev', {
+                const response = await fetch('https://mcp.ama.one', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
