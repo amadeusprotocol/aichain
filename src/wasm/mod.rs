@@ -17,6 +17,13 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let client = BlockchainClient::new(blockchain_url.clone())
         .map_err(|e| format!("failed to create client: {}", e))?;
 
+    let url = req.url()?;
+    let path = url.path();
+
+    if path == "/testnet-faucet" {
+        return serve_faucet_page();
+    }
+
     if req.method() == Method::Post {
         let client_ip = req.headers().get("CF-Connecting-IP").ok().flatten();
         let headers: HashMap<String, String> = req.headers().entries().collect();
@@ -29,6 +36,277 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             "capabilities": ["tools"]
         }))
     }
+}
+
+fn serve_faucet_page() -> Result<Response> {
+    let html = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Testnet AMA Faucet</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            color: #fff;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            color: #a0a0a0;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            color: #fff;
+            font-size: 14px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+        input[type="text"]::placeholder {
+            color: #666;
+        }
+        input[type="text"].invalid {
+            border-color: #ef4444;
+        }
+        .error-text {
+            color: #ef4444;
+            font-size: 12px;
+            margin-top: 6px;
+            display: none;
+        }
+        .error-text.visible {
+            display: block;
+        }
+        button {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 24px;
+            padding: 16px;
+            border-radius: 10px;
+            display: none;
+        }
+        .result.success {
+            display: block;
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        .result.error {
+            display: block;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .result-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .result.success .result-title {
+            color: #22c55e;
+        }
+        .result.error .result-title {
+            color: #ef4444;
+        }
+        .result-content {
+            color: #d1d5db;
+            font-size: 13px;
+            word-break: break-all;
+            font-family: 'Monaco', 'Menlo', monospace;
+        }
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Testnet AMA Faucet</h1>
+        <form id="faucetForm">
+            <div class="form-group">
+                <label for="address">Wallet Address</label>
+                <input
+                    type="text"
+                    id="address"
+                    name="address"
+                    placeholder="7nKaJ9FhBMdFGFHHNAX7DVuiSdtqVX1xKZSjTxRwXKvixAvRQJCzVb48rFGipwxpim"
+                    autocomplete="off"
+                    spellcheck="false"
+                >
+                <div class="error-text" id="addressError">Invalid address format. Must be 45-55 alphanumeric characters (Base58).</div>
+            </div>
+            <button type="submit" id="submitBtn">Claim $AMA</button>
+        </form>
+        <div class="result" id="result">
+            <div class="result-title" id="resultTitle"></div>
+            <div class="result-content" id="resultContent"></div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('faucetForm');
+        const addressInput = document.getElementById('address');
+        const addressError = document.getElementById('addressError');
+        const submitBtn = document.getElementById('submitBtn');
+        const result = document.getElementById('result');
+        const resultTitle = document.getElementById('resultTitle');
+        const resultContent = document.getElementById('resultContent');
+
+        // Base58 alphabet (excludes 0, O, I, l)
+        const base58Regex = /^[1-9A-HJ-NP-Za-km-z]{45,55}$/;
+
+        function validateAddress(address) {
+            return base58Regex.test(address);
+        }
+
+        addressInput.addEventListener('input', () => {
+            const value = addressInput.value.trim();
+            if (value && !validateAddress(value)) {
+                addressInput.classList.add('invalid');
+                addressError.classList.add('visible');
+            } else {
+                addressInput.classList.remove('invalid');
+                addressError.classList.remove('visible');
+            }
+        });
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const address = addressInput.value.trim();
+
+            if (!validateAddress(address)) {
+                addressInput.classList.add('invalid');
+                addressError.classList.add('visible');
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner"></span>Claiming...';
+            result.className = 'result';
+
+            try {
+                const response = await fetch('https://mcp.ama.one', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json, text/event-stream',
+                        'mcp-protocol-version': '2024-11-05'
+                    },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: 1,
+                        method: 'tools/call',
+                        params: {
+                            name: 'claim_testnet_ama',
+                            arguments: { address }
+                        }
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    result.className = 'result error';
+                    resultTitle.textContent = 'Error';
+                    resultContent.textContent = data.error.message || 'Unknown error occurred';
+                } else if (data.result && data.result.content) {
+                    const content = JSON.parse(data.result.content[0].text);
+                    if (content.status === 'success' && content.tx_hash) {
+                        result.className = 'result success';
+                        resultTitle.textContent = 'Success!';
+                        resultContent.textContent = 'Transaction Hash: ' + content.tx_hash;
+                    } else {
+                        result.className = 'result error';
+                        resultTitle.textContent = 'Error';
+                        resultContent.textContent = content.message || 'Claim failed';
+                    }
+                } else {
+                    result.className = 'result error';
+                    resultTitle.textContent = 'Error';
+                    resultContent.textContent = 'Unexpected response format';
+                }
+            } catch (err) {
+                result.className = 'result error';
+                resultTitle.textContent = 'Error';
+                resultContent.textContent = err.message || 'Network error occurred';
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Claim $AMA';
+            }
+        });
+    </script>
+</body>
+</html>"#;
+
+    Response::from_html(html)
 }
 
 async fn handle_mcp_request(
