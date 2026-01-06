@@ -1,6 +1,7 @@
-mod mint;
-mod tx;
+pub mod tx;
 
+#[cfg(target_arch = "wasm32")]
+mod worker_handlers {
 use crate::blockchain::*;
 use crate::BlockchainClient;
 use serde_json::{json, Value};
@@ -8,7 +9,7 @@ use std::collections::HashMap;
 use worker::*;
 
 #[event(fetch)]
-async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
+pub async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let blockchain_url = env
         .var("BLOCKCHAIN_URL")
         .map(|v| v.to_string())
@@ -339,18 +340,22 @@ async fn handle_tool_call(
     let tool = params["name"].as_str().unwrap_or("");
     let args = &params["arguments"];
     match tool {
-        "create_transfer" => {
-            let req: TransferRequest =
+        "create_transaction" => {
+            let req: TransactionRequest =
                 serde_json::from_value(args.clone()).map_err(|e| err(&e.to_string()))?;
-            client.create_transfer_blob(req).await
+            client.create_transaction_blob(req).await
                 .map(|b| ok(&json!({ "blob": b.blob, "signing_payload": b.signing_payload, "transaction_hash": b.transaction_hash, "status": "unsigned" })))
                 .map_err(|e| err(&e.to_string()))
         }
         "submit_transaction" => {
             let tx: SignedTransaction =
                 serde_json::from_value(args.clone()).map_err(|e| err(&e.to_string()))?;
+            let url = match tx.network.as_deref() {
+                Some("testnet") => env.var("AMADEUS_TESTNET_RPC").map(|v| v.to_string()).unwrap_or_else(|_| "https://testnet.amadeus.bot".to_string()),
+                _ => blockchain_url.clone(),
+            };
             client
-                .submit_signed_transaction(tx)
+                .submit_signed_transaction(tx, &url)
                 .await
                 .map(|r| ok(&r))
                 .map_err(|e| err(&e.to_string()))
@@ -453,11 +458,19 @@ async fn handle_tool_call(
 
 fn tools_list() -> Value {
     json!({ "tools": [
-        tool("create_transfer", "Creates an unsigned transaction blob for transferring assets between accounts",
-            json!({ "symbol": str_prop(), "source": str_prop(), "destination": str_prop(), "amount": str_prop(), "memo": str_prop() }),
-            vec!["symbol", "source", "destination", "amount"]),
+        tool("create_transaction", "Creates unsigned transaction for any contract call",
+            json!({
+                "signer": str_prop(),
+                "contract": str_prop(),
+                "function": str_prop(),
+                "args": { "type": "array" },
+                "attached_symbol": str_prop(),
+                "attached_amount": str_prop(),
+                "nonce": { "type": "number" }
+            }),
+            vec!["signer", "contract", "function", "args"]),
         tool("submit_transaction", "Submits a signed transaction to the blockchain network",
-            json!({ "transaction": str_prop(), "signature": str_prop() }), vec!["transaction", "signature"]),
+            json!({ "transaction": str_prop(), "signature": str_prop(), "network": str_prop() }), vec!["transaction", "signature"]),
         tool("get_account_balance", "Queries the balance of an account across all supported assets",
             json!({ "address": str_prop() }), vec!["address"]),
         tool("get_chain_stats", "Retrieves current blockchain statistics", json!({}), vec![]),
@@ -576,4 +589,6 @@ async fn claim_testnet_ama(
     }
 
     Ok(ok(&json!({ "status": "success", "tx_hash": tx_hash })))
+}
+
 }

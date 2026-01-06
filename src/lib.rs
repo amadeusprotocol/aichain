@@ -1,10 +1,8 @@
 pub mod blockchain;
+pub mod wasm;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;
-
-#[cfg(target_arch = "wasm32")]
-mod wasm;
 
 pub use blockchain::{BlockchainClient, BlockchainError};
 

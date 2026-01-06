@@ -2,20 +2,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
-pub struct TransferRequest {
-    #[validate(length(min = 1))]
-    pub symbol: String,
-    #[validate(length(min = 1))]
-    pub source: String,
-    #[validate(length(min = 1))]
-    pub destination: String,
-    #[validate(length(min = 1))]
-    pub amount: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub memo: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnsignedTransactionBlob {
     pub blob: String,
@@ -29,6 +15,8 @@ pub struct SignedTransaction {
     pub transaction: String,
     #[validate(length(min = 1))]
     pub signature: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +83,33 @@ pub struct ContractStateQuery {
     pub contract_address: String,
     #[validate(length(min = 1))]
     pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+pub struct TransactionRequest {
+    #[validate(length(min = 1))]
+    pub signer: String,
+    #[validate(length(min = 1))]
+    pub contract: String,
+    #[validate(length(min = 1))]
+    pub function: String,
+    pub args: Vec<Argument>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attached_symbol: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attached_amount: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Argument {
+    String(String),
+    Number(i64),
+    Base58 { b58: String },
+    Hex { hex: String },
+    Utf8 { utf8: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,6 +1,6 @@
 use crate::blockchain::{
     AccountQuery, BlockchainClient, BlockchainError, ContractStateQuery, HeightQuery,
-    SignedTransaction, TransactionHistoryQuery, TransactionQuery, TransferRequest,
+    SignedTransaction, TransactionHistoryQuery, TransactionQuery, TransactionRequest,
 };
 use rmcp::{
     handler::server::tool::{Parameters, ToolRouter},
@@ -15,25 +15,29 @@ use validator::Validate;
 #[derive(Clone)]
 pub struct BlockchainMcpServer {
     blockchain: Arc<BlockchainClient>,
+    mainnet_url: String,
+    testnet_url: String,
     tool_router: ToolRouter<Self>,
 }
 
 #[tool_router]
 impl BlockchainMcpServer {
-    pub fn new(blockchain: BlockchainClient) -> Self {
+    pub fn new(blockchain: BlockchainClient, mainnet_url: String, testnet_url: String) -> Self {
         Self {
             blockchain: Arc::new(blockchain),
+            mainnet_url,
+            testnet_url,
             tool_router: Self::tool_router(),
         }
     }
 
     #[tool(
-        name = "create_transfer",
-        description = "Creates an unsigned transaction blob for transferring assets between accounts. Returns the blob and signing payload for the agent to sign."
+        name = "create_transaction",
+        description = "Creates an unsigned transaction for any contract call. Takes signer public key, contract name, function name, and arguments. Returns transaction blob that only needs signing."
     )]
-    async fn create_transfer(
+    async fn create_transaction(
         &self,
-        params: Parameters<TransferRequest>,
+        params: Parameters<TransactionRequest>,
     ) -> Result<Json<serde_json::Value>, McpError> {
         let req = params.0;
         req.validate().map_err(|e| {
@@ -45,22 +49,22 @@ impl BlockchainMcpServer {
 
         let blob = self
             .blockchain
-            .create_transfer_blob(req)
+            .create_transaction_blob(req)
             .await
-            .map_err(|e| Self::blockchain_error("create_transfer", e))?;
+            .map_err(|e| Self::blockchain_error("create_transaction", e))?;
 
         Ok(Json(serde_json::json!({
             "blob": blob.blob,
             "signing_payload": blob.signing_payload,
             "transaction_hash": blob.transaction_hash,
             "status": "unsigned",
-            "next_step": "Sign the signing_payload and call submit_transaction with the signature"
+            "next_step": "Sign the signing_payload with BLS12-381 and call submit_transaction"
         })))
     }
 
     #[tool(
         name = "submit_transaction",
-        description = "Submits a signed transaction to the blockchain network. Requires the transaction blob and signature from the signing process."
+        description = "Submits a signed transaction to the blockchain network. Requires the transaction blob and signature from the signing process. Optional network parameter: 'mainnet' (default) or 'testnet'."
     )]
     async fn submit_transaction(
         &self,
@@ -74,9 +78,14 @@ impl BlockchainMcpServer {
             )
         })?;
 
+        let url = match tx.network.as_deref() {
+            Some("testnet") => &self.testnet_url,
+            _ => &self.mainnet_url,
+        };
+
         let response = self
             .blockchain
-            .submit_signed_transaction(tx)
+            .submit_signed_transaction(tx, url)
             .await
             .map_err(|e| Self::blockchain_error("submit_transaction", e))?;
 
@@ -461,25 +470,14 @@ impl BlockchainMcpServer {
                 ]
             },
             "mcp_tools_available": [
-                "create_transfer - Create unsigned transaction blob",
+                "create_transaction - Create unsigned transaction",
                 "submit_transaction - Submit signed transaction",
                 "get_account_balance - Query account balances",
                 "get_chain_stats - Get blockchain statistics",
-                "get_block_by_height - Get entries at height",
                 "get_transaction - Get transaction by hash",
-                "get_transaction_history - Get account transaction history",
-                "get_validators - List validator nodes",
-                "get_contract_state - Query smart contract storage",
-                "claim_testnet_ama - Claim testnet tokens (faucet)",
-                "get_entry_tip - Get latest blockchain entry",
-                "get_entry_by_hash - Get entry by hash",
-                "get_block_with_txs - Get block with full transactions",
-                "get_txs_in_entry - Get transactions in entry",
-                "get_epoch_score - Get validator mining scores",
-                "get_emission_address - Get validator emission address",
-                "get_richlist - Get top AMA holders",
-                "get_nodes - Get connected peers",
-                "get_removed_validators - Get removed validators"
+                "get_transaction_history - Get account history",
+                "get_validators - List validators",
+                "claim_testnet_ama - Claim testnet tokens"
             ]
         })))
     }
@@ -529,9 +527,9 @@ impl ServerHandler for BlockchainMcpServer {
                 .enable_prompts()
                 .build(),
             instructions: Some(
-                "Blockchain MCP server for creating and submitting transactions. \
-                Use create_transfer to build an unsigned transaction, sign it externally, \
-                then use submit_transaction to broadcast it to the network."
+                "Blockchain MCP server for Amadeus. \
+                Use create_transaction to build unsigned transactions, sign externally with BLS12-381, \
+                then submit_transaction to broadcast."
                     .into(),
             ),
             protocol_version: Default::default(),

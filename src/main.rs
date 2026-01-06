@@ -14,13 +14,15 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer().with_target(true))
         .init();
 
-    let blockchain_url =
+    let mainnet_url =
         env::var("BLOCKCHAIN_URL").unwrap_or_else(|_| "https://nodes.amadeus.bot".to_string());
+    let testnet_url =
+        env::var("AMADEUS_TESTNET_RPC").unwrap_or_else(|_| "https://testnet.amadeus.bot".to_string());
 
-    info!(url = %blockchain_url, "initializing blockchain client");
+    info!(mainnet_url = %mainnet_url, testnet_url = %testnet_url, "initializing blockchain client");
 
-    let client = BlockchainClient::new(blockchain_url)?;
-    let server = BlockchainMcpServer::new(client);
+    let client = BlockchainClient::new(mainnet_url.clone())?;
+    let server = BlockchainMcpServer::new(client, mainnet_url, testnet_url);
 
     let service = server
         .serve(rmcp::transport::stdio())

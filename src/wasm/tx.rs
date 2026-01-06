@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const DST_TX: &[u8] = b"AMADEUS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_TX_";
-
 mod args_serde {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     pub fn serialize<S: Serializer>(args: &[Vec<u8>], ser: S) -> Result<S::Ok, S::Error> {
@@ -39,58 +37,26 @@ pub struct Tx {
     pub signer: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TxU {
-    #[serde(with = "serde_bytes")]
-    pub hash: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub signature: Vec<u8>,
-    pub tx: Tx,
+pub struct UnsignedTx {
+    pub tx_blob: Vec<u8>,
+    pub signing_hash: [u8; 32],
 }
 
-fn get_public_key(sk_bytes: &[u8]) -> Result<Vec<u8>, &'static str> {
-    use bls12_381::Scalar;
-    use group::Curve;
-
-    if sk_bytes.len() != 64 {
-        return Err("secret key must be 64 bytes");
-    }
-    let bytes_64: [u8; 64] = sk_bytes.try_into().map_err(|_| "invalid sk length")?;
-    let sk_scalar = Scalar::from_bytes_wide(&bytes_64);
-    let pk_g1 = bls12_381::G1Projective::generator() * sk_scalar;
-    Ok(pk_g1.to_affine().to_compressed().to_vec())
-}
-
-fn sign(sk_bytes: &[u8], message: &[u8], dst: &[u8]) -> Result<Vec<u8>, &'static str> {
-    use bls12_381::Scalar;
-
-    if sk_bytes.len() != 64 {
-        return Err("secret key must be 64 bytes");
-    }
-    let bytes_64: [u8; 64] = sk_bytes.try_into().map_err(|_| "invalid sk length")?;
-    let sk_scalar = Scalar::from_bytes_wide(&bytes_64);
-    let mut sk_be = sk_scalar.to_bytes();
-    sk_be.reverse();
-    let sk = blst::min_pk::SecretKey::from_bytes(&sk_be).map_err(|_| "invalid secret key")?;
-    let sig = sk.sign(message, dst, &[]);
-    Ok(sig.to_bytes().to_vec())
-}
-
-pub struct BuiltTx {
-    pub packed: Vec<u8>,
-    pub hash: [u8; 32],
-}
-
-pub fn build(
-    sk_bytes: &[u8],
+pub fn build_unsigned(
+    signer_pk: &[u8],
     contract: &str,
     function: &str,
     args: &[Vec<u8>],
     attached_symbol: Option<&[u8]>,
     attached_amount: Option<&[u8]>,
-) -> Result<BuiltTx, &'static str> {
-    let pk = get_public_key(sk_bytes)?;
-    let nonce = js_sys::Date::now() as i128 * 1_000_000;
+    nonce: Option<i64>,
+) -> Result<UnsignedTx, &'static str> {
+    let nonce_val = nonce.map(|n| n as i128).unwrap_or_else(|| {
+        #[cfg(target_arch = "wasm32")]
+        { js_sys::Date::now() as i128 * 1_000_000 }
+        #[cfg(not(target_arch = "wasm32"))]
+        { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as i128 }
+    });
 
     let action = TxAction {
         op: "call".to_string(),
@@ -102,54 +68,73 @@ pub fn build(
     };
 
     let tx = Tx {
-        signer: pk,
-        nonce,
+        signer: signer_pk.to_vec(),
+        nonce: nonce_val,
         action,
     };
+
     let tx_encoded = vecpak::to_vec(&tx).map_err(|_| "failed to encode tx")?;
     let hash: [u8; 32] = Sha256::digest(&tx_encoded).into();
-    let signature = sign(sk_bytes, &hash, DST_TX)?;
 
-    let txu = TxU {
-        hash: hash.to_vec(),
-        signature,
-        tx,
-    };
-    let packed = vecpak::to_vec(&txu).map_err(|_| "failed to encode txu")?;
-    Ok(BuiltTx { packed, hash })
+    Ok(UnsignedTx {
+        tx_blob: tx_encoded,
+        signing_hash: hash,
+    })
 }
 
-#[allow(dead_code)]
-pub fn build_mint_tx(sk_bytes: &[u8], symbol: &str, amount: i128) -> Result<BuiltTx, &'static str> {
-    build(
-        sk_bytes,
-        "Coin",
-        "mint",
-        &[
-            symbol.as_bytes().to_vec(),
-            amount.to_string().as_bytes().to_vec(),
-        ],
-        None,
-        None,
-    )
+#[cfg(target_arch = "wasm32")]
+pub struct BuiltTx {
+    pub packed: Vec<u8>,
+    pub hash: [u8; 32],
 }
 
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TxU {
+    #[serde(with = "serde_bytes")]
+    hash: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    signature: Vec<u8>,
+    tx: Tx,
+}
+
+#[cfg(target_arch = "wasm32")]
 pub fn build_transfer_tx(
     sk_bytes: &[u8],
     receiver: &[u8],
     symbol: &str,
     amount: i128,
 ) -> Result<BuiltTx, &'static str> {
-    build(
-        sk_bytes,
-        "Coin",
-        "transfer",
-        &[
-            receiver.to_vec(),
-            amount.to_string().as_bytes().to_vec(),
-            symbol.as_bytes().to_vec(),
-        ],
-        None,
-        None,
-    )
+    use bls12_381::Scalar;
+    use group::Curve;
+
+    if sk_bytes.len() != 64 {
+        return Err("secret key must be 64 bytes");
+    }
+    let bytes_64: [u8; 64] = sk_bytes.try_into().map_err(|_| "invalid sk length")?;
+    let sk_scalar = Scalar::from_bytes_wide(&bytes_64);
+    let pk = (bls12_381::G1Projective::generator() * sk_scalar).to_affine().to_compressed().to_vec();
+
+    let nonce = js_sys::Date::now() as i128 * 1_000_000;
+    let action = TxAction {
+        op: "call".to_string(),
+        contract: "Coin".to_string(),
+        function: "transfer".to_string(),
+        args: vec![receiver.to_vec(), amount.to_string().as_bytes().to_vec(), symbol.as_bytes().to_vec()],
+        attached_symbol: None,
+        attached_amount: None,
+    };
+
+    let tx = Tx { signer: pk.clone(), nonce, action };
+    let tx_encoded = vecpak::to_vec(&tx).map_err(|_| "failed to encode tx")?;
+    let hash: [u8; 32] = Sha256::digest(&tx_encoded).into();
+
+    let mut sk_be = sk_scalar.to_bytes();
+    sk_be.reverse();
+    let sk = blst::min_pk::SecretKey::from_bytes(&sk_be).map_err(|_| "invalid secret key")?;
+    let signature = sk.sign(&hash, b"AMADEUS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_TX_", &[]).to_bytes().to_vec();
+
+    let txu = TxU { hash: hash.to_vec(), signature, tx };
+    let packed = vecpak::to_vec(&txu).map_err(|_| "failed to encode txu")?;
+    Ok(BuiltTx { packed, hash })
 }

@@ -2,8 +2,8 @@ use super::{
     error::{BlockchainError, Result},
     types::*,
 };
+use crate::wasm::tx;
 use reqwest::{header, Client, Response};
-use serde_json::json;
 use std::time::Duration;
 use tokio_retry::{
     strategy::{jitter, ExponentialBackoff},
@@ -32,36 +32,64 @@ impl BlockchainClient {
         })
     }
 
-    #[tracing::instrument(skip(self), fields(source=%req.source, dest=%req.destination, symbol=%req.symbol))]
-    pub async fn create_transfer_blob(
+    #[tracing::instrument(skip(self), fields(contract=%req.contract, function=%req.function))]
+    pub async fn create_transaction_blob(
         &self,
-        req: TransferRequest,
+        req: TransactionRequest,
     ) -> Result<UnsignedTransactionBlob> {
-        let payload = json!({
-            "type": "transfer",
-            "from": req.source,
-            "to": req.destination,
-            "asset": req.symbol,
-            "amount": req.amount,
-            "memo": req.memo,
-        });
+        let signer_pk = bs58::decode(&req.signer)
+            .into_vec()
+            .map_err(|_| BlockchainError::ValidationFailed("invalid signer base58".into()))?;
 
-        let response = self
-            .retry_request("POST", "/api/v1/tx/build", Some(&payload))
-            .await?;
-        self.parse_response(response).await
+        let args: Result<Vec<Vec<u8>>> = req.args.iter().map(|arg| match arg {
+            Argument::String(s) => Ok(s.as_bytes().to_vec()),
+            Argument::Number(n) => Ok(n.to_string().as_bytes().to_vec()),
+            Argument::Base58 { b58 } => bs58::decode(b58)
+                .into_vec()
+                .map_err(|_| BlockchainError::ValidationFailed("invalid base58 arg".into())),
+            Argument::Hex { hex } => hex::decode(hex.trim_start_matches("0x"))
+                .map_err(|_| BlockchainError::ValidationFailed("invalid hex arg".into())),
+            Argument::Utf8 { utf8 } => Ok(utf8.as_bytes().to_vec()),
+        }).collect();
+        let args = args?;
+
+        let attached_symbol = req.attached_symbol.as_ref().map(|s| s.as_bytes());
+        let attached_amount = req.attached_amount.as_ref().map(|s| s.as_bytes());
+
+        let unsigned = tx::build_unsigned(
+            &signer_pk,
+            &req.contract,
+            &req.function,
+            &args,
+            attached_symbol,
+            attached_amount,
+            req.nonce,
+        ).map_err(|e| BlockchainError::ValidationFailed(e.into()))?;
+
+        Ok(UnsignedTransactionBlob {
+            blob: bs58::encode(&unsigned.tx_blob).into_string(),
+            signing_payload: hex::encode(unsigned.signing_hash),
+            transaction_hash: bs58::encode(unsigned.signing_hash).into_string(),
+        })
     }
 
     #[tracing::instrument(skip(self, tx), fields(tx_hash))]
-    pub async fn submit_signed_transaction(&self, tx: SignedTransaction) -> Result<SubmitResponse> {
-        let payload = json!({
-            "transaction": tx.transaction,
-            "signature": tx.signature,
-        });
+    pub async fn submit_signed_transaction(&self, tx: SignedTransaction, url: &str) -> Result<SubmitResponse> {
+        let body = format!("{}{}", tx.transaction, tx.signature);
+        let full_url = format!("{}/api/tx/submit", url);
 
-        let response = self
-            .retry_request("POST", "/api/v1/tx/submit", Some(&payload))
-            .await?;
+        let response = self.client
+            .post(&full_url)
+            .header(header::CONTENT_TYPE, "text/plain")
+            .body(body)
+            .send()
+            .await
+            .map_err(BlockchainError::HttpRequest)?;
+
+        if !response.status().is_success() {
+            return Err(BlockchainError::InvalidResponse(format!("HTTP {}", response.status())));
+        }
+
         self.parse_response(response).await
     }
 
