@@ -70,18 +70,21 @@ impl BlockchainClient {
             blob: bs58::encode(&unsigned.tx_blob).into_string(),
             signing_payload: hex::encode(unsigned.signing_hash),
             transaction_hash: bs58::encode(unsigned.signing_hash).into_string(),
+            tx_bytes: unsigned.tx_blob,
         })
     }
 
     #[tracing::instrument(skip(self, tx), fields(tx_hash))]
     pub async fn submit_signed_transaction(&self, tx: SignedTransaction, url: &str) -> Result<SubmitResponse> {
-        let body = format!("{}{}", tx.transaction, tx.signature);
+        let txu_packed = tx::finalize_transaction(&tx.transaction, &tx.signature)
+            .map_err(|e| BlockchainError::ValidationFailed(e.into()))?;
+        let txu_b58 = bs58::encode(&txu_packed).into_string();
         let full_url = format!("{}/api/tx/submit", url);
 
         let response = self.client
             .post(&full_url)
             .header(header::CONTENT_TYPE, "text/plain")
-            .body(body)
+            .body(txu_b58)
             .send()
             .await
             .map_err(BlockchainError::HttpRequest)?;

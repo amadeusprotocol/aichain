@@ -42,6 +42,29 @@ pub struct UnsignedTx {
     pub signing_hash: [u8; 32],
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TxU {
+    #[serde(with = "serde_bytes")]
+    hash: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    signature: Vec<u8>,
+    tx: Tx,
+}
+
+pub fn finalize_transaction(tx_blob_b58: &str, signature_b58: &str) -> Result<Vec<u8>, &'static str> {
+    let tx_encoded = bs58::decode(tx_blob_b58).into_vec().map_err(|_| "invalid blob base58")?;
+    let signature = bs58::decode(signature_b58).into_vec().map_err(|_| "invalid signature base58")?;
+    let tx: Tx = vecpak::from_slice(&tx_encoded).map_err(|_| "failed to decode tx")?;
+    let hash: [u8; 32] = Sha256::digest(&tx_encoded).into();
+
+    let txu = TxU {
+        hash: hash.to_vec(),
+        signature,
+        tx,
+    };
+    vecpak::to_vec(&txu).map_err(|_| "failed to encode txu")
+}
+
 pub fn build_unsigned(
     signer_pk: &[u8],
     contract: &str,
@@ -86,16 +109,6 @@ pub fn build_unsigned(
 pub struct BuiltTx {
     pub packed: Vec<u8>,
     pub hash: [u8; 32],
-}
-
-#[cfg(target_arch = "wasm32")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct TxU {
-    #[serde(with = "serde_bytes")]
-    hash: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    signature: Vec<u8>,
-    tx: Tx,
 }
 
 #[cfg(target_arch = "wasm32")]

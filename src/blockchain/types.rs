@@ -7,6 +7,8 @@ pub struct UnsignedTransactionBlob {
     pub blob: String,
     pub signing_payload: String,
     pub transaction_hash: String,
+    #[serde(skip)]
+    pub tx_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
