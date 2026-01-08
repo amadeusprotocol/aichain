@@ -14,11 +14,10 @@ use tracing::warn;
 #[derive(Clone)]
 pub struct BlockchainClient {
     client: Client,
-    base_url: String,
 }
 
 impl BlockchainClient {
-    pub fn new(base_url: String) -> Result<Self> {
+    pub fn new(_base_url: String) -> Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .pool_idle_timeout(Duration::from_secs(90))
@@ -26,10 +25,7 @@ impl BlockchainClient {
             .build()
             .map_err(BlockchainError::HttpRequest)?;
 
-        Ok(Self {
-            client,
-            base_url: base_url.trim_end_matches('/').to_string(),
-        })
+        Ok(Self { client })
     }
 
     #[tracing::instrument(skip(self), fields(contract=%req.contract, function=%req.function))]
@@ -104,9 +100,9 @@ impl BlockchainClient {
     }
 
     #[tracing::instrument(skip(self), fields(address=%address))]
-    pub async fn get_account_balance(&self, address: &str) -> Result<AccountBalance> {
+    pub async fn get_account_balance(&self, address: &str, url: &str) -> Result<AccountBalance> {
         let path = format!("/api/wallet/balance_all/{}", address);
-        let response = self.retry_request("GET", &path, None).await?;
+        let response = self.retry_request_with_url(url, "GET", &path, None).await?;
         let api_response: serde_json::Value = self.parse_response(response).await?;
 
         if api_response.get("error").and_then(|e| e.as_str()) != Some("ok") {
@@ -131,8 +127,8 @@ impl BlockchainClient {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_chain_stats(&self) -> Result<ChainStats> {
-        let response = self.retry_request("GET", "/api/chain/stats", None).await?;
+    pub async fn get_chain_stats(&self, url: &str) -> Result<ChainStats> {
+        let response = self.retry_request_with_url(url, "GET", "/api/chain/stats", None).await?;
         let api_response: serde_json::Value = self.parse_response(response).await?;
 
         if api_response.get("error").and_then(|e| e.as_str()) != Some("ok") {
@@ -150,9 +146,9 @@ impl BlockchainClient {
     }
 
     #[tracing::instrument(skip(self), fields(height=%height))]
-    pub async fn get_block_by_height(&self, height: u64) -> Result<Vec<BlockEntry>> {
+    pub async fn get_block_by_height(&self, height: u64, url: &str) -> Result<Vec<BlockEntry>> {
         let path = format!("/api/chain/height/{}", height);
-        let response = self.retry_request("GET", &path, None).await?;
+        let response = self.retry_request_with_url(url, "GET", &path, None).await?;
         let api_response: serde_json::Value = self.parse_response(response).await?;
 
         if api_response.get("error").and_then(|e| e.as_str()) != Some("ok") {
@@ -171,22 +167,18 @@ impl BlockchainClient {
     }
 
     #[tracing::instrument(skip(self), fields(tx_hash=%tx_hash))]
-    pub async fn get_transaction(&self, tx_hash: &str) -> Result<Transaction> {
+    pub async fn get_transaction(&self, tx_hash: &str, url: &str) -> Result<Transaction> {
         let path = format!("/api/chain/tx/{}", tx_hash);
-        let response = self.retry_request("GET", &path, None).await?;
+        let response = self.retry_request_with_url(url, "GET", &path, None).await?;
         let api_response: serde_json::Value = self.parse_response(response).await?;
 
-        if api_response.get("error").and_then(|e| e.as_str()) == Some("not_found") {
+        if api_response.get("result").and_then(|r| r.get("error")).and_then(|e| e.as_str()) == Some("not_found") {
             return Err(BlockchainError::InvalidResponse(
                 "transaction not found".to_string(),
             ));
         }
 
-        let transaction = api_response.get("transaction").ok_or_else(|| {
-            BlockchainError::InvalidResponse("missing transaction field".to_string())
-        })?;
-
-        serde_json::from_value(transaction.clone()).map_err(|e| {
+        serde_json::from_value(api_response).map_err(|e| {
             BlockchainError::InvalidResponse(format!("failed to parse transaction: {}", e))
         })
     }
@@ -198,6 +190,7 @@ impl BlockchainClient {
         limit: Option<u32>,
         offset: Option<u32>,
         sort: Option<&str>,
+        url: &str,
     ) -> Result<Vec<Transaction>> {
         let mut path = format!("/api/chain/tx_events_by_account/{}", address);
         let mut params = vec![];
@@ -217,7 +210,7 @@ impl BlockchainClient {
             path.push_str(&params.join("&"));
         }
 
-        let response = self.retry_request("GET", &path, None).await?;
+        let response = self.retry_request_with_url(url, "GET", &path, None).await?;
         let api_response: serde_json::Value = self.parse_response(response).await?;
 
         let txs = api_response
@@ -229,9 +222,9 @@ impl BlockchainClient {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_validators(&self) -> Result<Vec<String>> {
+    pub async fn get_validators(&self, url: &str) -> Result<Vec<String>> {
         let response = self
-            .retry_request("GET", "/api/peer/trainers", None)
+            .retry_request_with_url(url, "GET", "/api/peer/trainers", None)
             .await?;
         let api_response: serde_json::Value = self.parse_response(response).await?;
 
@@ -255,21 +248,23 @@ impl BlockchainClient {
         &self,
         contract_address: &str,
         key: &str,
+        url: &str,
     ) -> Result<serde_json::Value> {
         let path = format!("/api/contract/get/{}/{}", contract_address, key);
-        let response = self.retry_request("GET", &path, None).await?;
+        let response = self.retry_request_with_url(url, "GET", &path, None).await?;
         self.parse_response(response).await
     }
 
-    async fn retry_request(
+    async fn retry_request_with_url(
         &self,
+        base_url: &str,
         method: &str,
         path: &str,
         body: Option<&serde_json::Value>,
     ) -> Result<Response> {
         let retry_strategy = ExponentialBackoff::from_millis(100).map(jitter).take(3);
 
-        let url = format!("{}{}", self.base_url, path);
+        let url = format!("{}{}", base_url.trim_end_matches('/'), path);
 
         Retry::spawn(retry_strategy, || async {
             let mut request = match method {

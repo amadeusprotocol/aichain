@@ -6,15 +6,11 @@ use crate::wasm::tx;
 use worker::{Fetch, Method, Request, RequestInit};
 
 #[derive(Clone)]
-pub struct BlockchainClient {
-    base_url: String,
-}
+pub struct BlockchainClient {}
 
 impl BlockchainClient {
-    pub fn new(base_url: String) -> Result<Self> {
-        Ok(Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
-        })
+    pub fn new(_base_url: String) -> Result<Self> {
+        Ok(Self {})
     }
 
     pub async fn create_transaction_blob(
@@ -98,9 +94,9 @@ impl BlockchainClient {
         })
     }
 
-    pub async fn get_account_balance(&self, address: &str) -> Result<AccountBalance> {
+    pub async fn get_account_balance(&self, address: &str, url: &str) -> Result<AccountBalance> {
         let path = format!("/api/wallet/balance_all/{}", address);
-        let resp: serde_json::Value = self.request("GET", &path, None).await?;
+        let resp: serde_json::Value = self.request_with_url(url, "GET", &path, None).await?;
 
         if resp.get("error").and_then(|e| e.as_str()) != Some("ok") {
             return Err(BlockchainError::AccountNotFound {
@@ -119,8 +115,8 @@ impl BlockchainClient {
         })
     }
 
-    pub async fn get_chain_stats(&self) -> Result<ChainStats> {
-        let resp: serde_json::Value = self.request("GET", "/api/chain/stats", None).await?;
+    pub async fn get_chain_stats(&self, url: &str) -> Result<ChainStats> {
+        let resp: serde_json::Value = self.request_with_url(url, "GET", "/api/chain/stats", None).await?;
 
         let stats = resp
             .get("stats")
@@ -130,9 +126,9 @@ impl BlockchainClient {
             .map_err(|e| BlockchainError::InvalidResponse(e.to_string()))
     }
 
-    pub async fn get_block_by_height(&self, height: u64) -> Result<Vec<BlockEntry>> {
+    pub async fn get_block_by_height(&self, height: u64, url: &str) -> Result<Vec<BlockEntry>> {
         let path = format!("/api/chain/height/{}", height);
-        let resp: serde_json::Value = self.request("GET", &path, None).await?;
+        let resp: serde_json::Value = self.request_with_url(url, "GET", &path, None).await?;
 
         let entries = resp
             .get("entries")
@@ -142,21 +138,17 @@ impl BlockchainClient {
             .map_err(|e| BlockchainError::InvalidResponse(e.to_string()))
     }
 
-    pub async fn get_transaction(&self, tx_hash: &str) -> Result<Transaction> {
+    pub async fn get_transaction(&self, tx_hash: &str, url: &str) -> Result<Transaction> {
         let path = format!("/api/chain/tx/{}", tx_hash);
-        let resp: serde_json::Value = self.request("GET", &path, None).await?;
+        let resp: serde_json::Value = self.request_with_url(url, "GET", &path, None).await?;
 
-        if resp.get("error").and_then(|e| e.as_str()) == Some("not_found") {
+        if resp.get("result").and_then(|r| r.get("error")).and_then(|e| e.as_str()) == Some("not_found") {
             return Err(BlockchainError::InvalidResponse(
                 "transaction not found".into(),
             ));
         }
 
-        let tx = resp
-            .get("transaction")
-            .ok_or_else(|| BlockchainError::InvalidResponse("missing transaction".into()))?;
-
-        serde_json::from_value(tx.clone())
+        serde_json::from_value(resp)
             .map_err(|e| BlockchainError::InvalidResponse(e.to_string()))
     }
 
@@ -166,6 +158,7 @@ impl BlockchainClient {
         limit: Option<u32>,
         offset: Option<u32>,
         sort: Option<&str>,
+        url: &str,
     ) -> Result<Vec<Transaction>> {
         let mut path = format!("/api/chain/tx_events_by_account/{}", address);
         let mut params = vec![];
@@ -183,7 +176,7 @@ impl BlockchainClient {
             path.push_str(&params.join("&"));
         }
 
-        let resp: serde_json::Value = self.request("GET", &path, None).await?;
+        let resp: serde_json::Value = self.request_with_url(url, "GET", &path, None).await?;
         let txs = resp
             .get("txs")
             .ok_or_else(|| BlockchainError::InvalidResponse("missing txs".into()))?;
@@ -192,8 +185,8 @@ impl BlockchainClient {
             .map_err(|e| BlockchainError::InvalidResponse(e.to_string()))
     }
 
-    pub async fn get_validators(&self) -> Result<Vec<String>> {
-        let resp: serde_json::Value = self.request("GET", "/api/peer/trainers", None).await?;
+    pub async fn get_validators(&self, url: &str) -> Result<Vec<String>> {
+        let resp: serde_json::Value = self.request_with_url(url, "GET", "/api/peer/trainers", None).await?;
 
         let trainers = resp
             .get("trainers")
@@ -207,18 +200,20 @@ impl BlockchainClient {
         &self,
         contract_address: &str,
         key: &str,
+        url: &str,
     ) -> Result<serde_json::Value> {
         let path = format!("/api/contract/get/{}/{}", contract_address, key);
-        self.request("GET", &path, None).await
+        self.request_with_url(url, "GET", &path, None).await
     }
 
-    async fn request<T: serde::de::DeserializeOwned>(
+    async fn request_with_url<T: serde::de::DeserializeOwned>(
         &self,
+        base_url: &str,
         method: &str,
         path: &str,
         body: Option<&serde_json::Value>,
     ) -> Result<T> {
-        let url = format!("{}{}", self.base_url, path);
+        let url = format!("{}{}", base_url.trim_end_matches('/'), path);
         let mut init = RequestInit::new();
         init.with_method(if method == "GET" {
             Method::Get

@@ -1,6 +1,7 @@
 use crate::blockchain::{
-    AccountQuery, BlockchainClient, BlockchainError, ContractStateQuery, HeightQuery,
-    SignedTransaction, TransactionHistoryQuery, TransactionQuery, TransactionRequest,
+    AccountQuery, BlockchainClient, BlockchainError, ChainStatsQuery, ContractStateQuery,
+    HeightQuery, SignedTransaction, TransactionHistoryQuery, TransactionQuery,
+    TransactionRequest, ValidatorsQuery,
 };
 use rmcp::{
     handler::server::tool::{Parameters, ToolRouter},
@@ -105,7 +106,7 @@ impl BlockchainMcpServer {
 
     #[tool(
         name = "get_account_balance",
-        description = "Queries the balance of an account across all supported assets."
+        description = "Queries the balance of an account across all supported assets. Optional network parameter: 'mainnet' (default) or 'testnet'."
     )]
     async fn get_account_balance(
         &self,
@@ -119,9 +120,14 @@ impl BlockchainMcpServer {
             )
         })?;
 
+        let url = match query.network.as_deref() {
+            Some("testnet") => &self.testnet_url,
+            _ => &self.mainnet_url,
+        };
+
         let balance = self
             .blockchain
-            .get_account_balance(&query.address)
+            .get_account_balance(&query.address, url)
             .await
             .map_err(|e| Self::blockchain_error("get_account_balance", e))?;
 
@@ -130,12 +136,28 @@ impl BlockchainMcpServer {
 
     #[tool(
         name = "get_chain_stats",
-        description = "Retrieves current blockchain statistics including height, total transactions, and total accounts."
+        description = "Retrieves current blockchain statistics including height, total transactions, and total accounts. Optional network parameter: 'mainnet' (default) or 'testnet'."
     )]
-    async fn get_chain_stats(&self) -> Result<Json<serde_json::Value>, McpError> {
+    async fn get_chain_stats(
+        &self,
+        params: Parameters<ChainStatsQuery>,
+    ) -> Result<Json<serde_json::Value>, McpError> {
+        let query = params.0;
+        query.validate().map_err(|e| {
+            McpError::invalid_params(
+                "validation_failed",
+                Some(serde_json::json!({ "errors": e })),
+            )
+        })?;
+
+        let url = match query.network.as_deref() {
+            Some("testnet") => &self.testnet_url,
+            _ => &self.mainnet_url,
+        };
+
         let stats = self
             .blockchain
-            .get_chain_stats()
+            .get_chain_stats(url)
             .await
             .map_err(|e| Self::blockchain_error("get_chain_stats", e))?;
 
@@ -144,7 +166,7 @@ impl BlockchainMcpServer {
 
     #[tool(
         name = "get_block_by_height",
-        description = "Retrieves blockchain entries at a specific height. Returns all entries for that height."
+        description = "Retrieves blockchain entries at a specific height. Returns all entries for that height. Optional network parameter: 'mainnet' (default) or 'testnet'."
     )]
     async fn get_block_by_height(
         &self,
@@ -158,9 +180,14 @@ impl BlockchainMcpServer {
             )
         })?;
 
+        let url = match query.network.as_deref() {
+            Some("testnet") => &self.testnet_url,
+            _ => &self.mainnet_url,
+        };
+
         let entries = self
             .blockchain
-            .get_block_by_height(query.height)
+            .get_block_by_height(query.height, url)
             .await
             .map_err(|e| Self::blockchain_error("get_block_by_height", e))?;
 
@@ -169,7 +196,7 @@ impl BlockchainMcpServer {
 
     #[tool(
         name = "get_transaction",
-        description = "Retrieves a specific transaction by its hash. Returns detailed transaction information."
+        description = "Retrieves a specific transaction by its hash. Returns detailed transaction information. Optional network parameter: 'mainnet' (default) or 'testnet'."
     )]
     async fn get_transaction(
         &self,
@@ -183,9 +210,14 @@ impl BlockchainMcpServer {
             )
         })?;
 
+        let url = match query.network.as_deref() {
+            Some("testnet") => &self.testnet_url,
+            _ => &self.mainnet_url,
+        };
+
         let transaction = self
             .blockchain
-            .get_transaction(&query.tx_hash)
+            .get_transaction(&query.tx_hash, url)
             .await
             .map_err(|e| Self::blockchain_error("get_transaction", e))?;
 
@@ -194,7 +226,7 @@ impl BlockchainMcpServer {
 
     #[tool(
         name = "get_transaction_history",
-        description = "Retrieves transaction history for a specific account. Supports pagination with limit, offset, and sort parameters."
+        description = "Retrieves transaction history for a specific account. Supports pagination with limit, offset, and sort parameters. Optional network parameter: 'mainnet' (default) or 'testnet'."
     )]
     async fn get_transaction_history(
         &self,
@@ -208,6 +240,11 @@ impl BlockchainMcpServer {
             )
         })?;
 
+        let url = match query.network.as_deref() {
+            Some("testnet") => &self.testnet_url,
+            _ => &self.mainnet_url,
+        };
+
         let transactions = self
             .blockchain
             .get_transaction_history(
@@ -215,6 +252,7 @@ impl BlockchainMcpServer {
                 query.limit,
                 query.offset,
                 query.sort.as_deref(),
+                url,
             )
             .await
             .map_err(|e| Self::blockchain_error("get_transaction_history", e))?;
@@ -224,12 +262,28 @@ impl BlockchainMcpServer {
 
     #[tool(
         name = "get_validators",
-        description = "Retrieves the list of current validator nodes (trainers) in the network."
+        description = "Retrieves the list of current validator nodes (trainers) in the network. Optional network parameter: 'mainnet' (default) or 'testnet'."
     )]
-    async fn get_validators(&self) -> Result<Json<serde_json::Value>, McpError> {
+    async fn get_validators(
+        &self,
+        params: Parameters<ValidatorsQuery>,
+    ) -> Result<Json<serde_json::Value>, McpError> {
+        let query = params.0;
+        query.validate().map_err(|e| {
+            McpError::invalid_params(
+                "validation_failed",
+                Some(serde_json::json!({ "errors": e })),
+            )
+        })?;
+
+        let url = match query.network.as_deref() {
+            Some("testnet") => &self.testnet_url,
+            _ => &self.mainnet_url,
+        };
+
         let validators = self
             .blockchain
-            .get_validators()
+            .get_validators(url)
             .await
             .map_err(|e| Self::blockchain_error("get_validators", e))?;
 
@@ -241,7 +295,7 @@ impl BlockchainMcpServer {
 
     #[tool(
         name = "get_contract_state",
-        description = "Retrieves a specific value from smart contract storage by contract address and key."
+        description = "Retrieves a specific value from smart contract storage by contract address and key. Optional network parameter: 'mainnet' (default) or 'testnet'."
     )]
     async fn get_contract_state(
         &self,
@@ -255,9 +309,14 @@ impl BlockchainMcpServer {
             )
         })?;
 
+        let url = match query.network.as_deref() {
+            Some("testnet") => &self.testnet_url,
+            _ => &self.mainnet_url,
+        };
+
         let state = self
             .blockchain
-            .get_contract_state(&query.contract_address, &query.key)
+            .get_contract_state(&query.contract_address, &query.key, url)
             .await
             .map_err(|e| Self::blockchain_error("get_contract_state", e))?;
 

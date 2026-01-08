@@ -32,6 +32,8 @@ pub struct SubmitResponse {
 pub struct AccountQuery {
     #[validate(length(min = 1))]
     pub address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,12 +54,16 @@ pub struct Balance {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 pub struct HeightQuery {
     pub height: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
 pub struct TransactionQuery {
     #[validate(length(min = 1))]
     pub tx_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
@@ -70,6 +76,8 @@ pub struct TransactionHistoryQuery {
     pub offset: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
@@ -78,6 +86,8 @@ pub struct ContractStateQuery {
     pub contract_address: String,
     #[validate(length(min = 1))]
     pub key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
@@ -105,6 +115,12 @@ pub enum Argument {
     Base58 { b58: String },
     Hex { hex: String },
     Utf8 { utf8: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+pub struct ChainStatsQuery {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,16 +172,53 @@ pub struct Consensus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
     pub hash: String,
-    pub from: String,
-    pub to: String,
-    pub amount: String,
-    pub symbol: String,
-    pub fee: String,
-    pub nonce: u64,
-    pub timestamp: u64,
+    pub metadata: TransactionMetadata,
     pub signature: String,
-    #[serde(rename = "type")]
-    pub tx_type: String,
+    pub result: TransactionResult,
+    pub tx: TransactionData,
+    pub receipt: TransactionReceipt,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionMetadata {
+    pub entry_hash: String,
+    pub entry_height: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tx_event: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionResult {
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionData {
+    pub action: TransactionAction,
+    pub nonce: u64,
+    pub signer: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionAction {
+    pub args: Vec<String>,
+    pub function: String,
+    pub op: String,
+    pub contract: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionReceipt {
+    pub success: bool,
+    pub result: String,
+    pub logs: Vec<serde_json::Value>,
+    pub exec_used: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Validate)]
+pub struct ValidatorsQuery {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

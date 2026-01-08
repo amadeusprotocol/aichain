@@ -368,23 +368,37 @@ async fn handle_tool_call(
             let addr = args["address"]
                 .as_str()
                 .ok_or_else(|| err("missing address"))?;
+            let url = match args["network"].as_str() {
+                Some("testnet") => env.var("AMADEUS_TESTNET_RPC").map(|v| v.to_string()).unwrap_or_else(|_| "https://testnet.amadeus.bot".to_string()),
+                _ => rpc.to_string(),
+            };
             client
-                .get_account_balance(addr)
+                .get_account_balance(addr, &url)
                 .await
                 .map(|b| ok(&b))
                 .map_err(|e| err(&e.to_string()))
         }
-        "get_chain_stats" => client
-            .get_chain_stats()
-            .await
-            .map(|s| ok(&s))
-            .map_err(|e| err(&e.to_string())),
+        "get_chain_stats" => {
+            let url = match args["network"].as_str() {
+                Some("testnet") => env.var("AMADEUS_TESTNET_RPC").map(|v| v.to_string()).unwrap_or_else(|_| "https://testnet.amadeus.bot".to_string()),
+                _ => rpc.to_string(),
+            };
+            client
+                .get_chain_stats(&url)
+                .await
+                .map(|s| ok(&s))
+                .map_err(|e| err(&e.to_string()))
+        }
         "get_block_by_height" => {
             let height = args["height"]
                 .as_u64()
                 .ok_or_else(|| err("missing height"))?;
+            let url = match args["network"].as_str() {
+                Some("testnet") => env.var("AMADEUS_TESTNET_RPC").map(|v| v.to_string()).unwrap_or_else(|_| "https://testnet.amadeus.bot".to_string()),
+                _ => rpc.to_string(),
+            };
             client
-                .get_block_by_height(height)
+                .get_block_by_height(height, &url)
                 .await
                 .map(|e| ok(&e))
                 .map_err(|e| err(&e.to_string()))
@@ -393,8 +407,12 @@ async fn handle_tool_call(
             let hash = args["tx_hash"]
                 .as_str()
                 .ok_or_else(|| err("missing tx_hash"))?;
+            let url = match args["network"].as_str() {
+                Some("testnet") => env.var("AMADEUS_TESTNET_RPC").map(|v| v.to_string()).unwrap_or_else(|_| "https://testnet.amadeus.bot".to_string()),
+                _ => rpc.to_string(),
+            };
             client
-                .get_transaction(hash)
+                .get_transaction(hash, &url)
                 .await
                 .map(|t| ok(&t))
                 .map_err(|e| err(&e.to_string()))
@@ -406,24 +424,38 @@ async fn handle_tool_call(
             let limit = args["limit"].as_u64().map(|v| v as u32);
             let offset = args["offset"].as_u64().map(|v| v as u32);
             let sort = args["sort"].as_str();
+            let url = match args["network"].as_str() {
+                Some("testnet") => env.var("AMADEUS_TESTNET_RPC").map(|v| v.to_string()).unwrap_or_else(|_| "https://testnet.amadeus.bot".to_string()),
+                _ => rpc.to_string(),
+            };
             client
-                .get_transaction_history(addr, limit, offset, sort)
+                .get_transaction_history(addr, limit, offset, sort, &url)
                 .await
                 .map(|t| ok(&t))
                 .map_err(|e| err(&e.to_string()))
         }
-        "get_validators" => client
-            .get_validators()
-            .await
-            .map(|v| ok(&json!({ "validators": v, "count": v.len() })))
-            .map_err(|e| err(&e.to_string())),
+        "get_validators" => {
+            let url = match args["network"].as_str() {
+                Some("testnet") => env.var("AMADEUS_TESTNET_RPC").map(|v| v.to_string()).unwrap_or_else(|_| "https://testnet.amadeus.bot".to_string()),
+                _ => rpc.to_string(),
+            };
+            client
+                .get_validators(&url)
+                .await
+                .map(|v| ok(&json!({ "validators": v, "count": v.len() })))
+                .map_err(|e| err(&e.to_string()))
+        }
         "get_contract_state" => {
             let addr = args["contract_address"]
                 .as_str()
                 .ok_or_else(|| err("missing contract_address"))?;
             let key = args["key"].as_str().ok_or_else(|| err("missing key"))?;
+            let url = match args["network"].as_str() {
+                Some("testnet") => env.var("AMADEUS_TESTNET_RPC").map(|v| v.to_string()).unwrap_or_else(|_| "https://testnet.amadeus.bot".to_string()),
+                _ => rpc.to_string(),
+            };
             client
-                .get_contract_state(addr, key)
+                .get_contract_state(addr, key, &url)
                 .await
                 .map(|s| ok(&json!({ "contract_address": addr, "key": key, "value": s })))
                 .map_err(|e| err(&e.to_string()))
