@@ -145,20 +145,22 @@ pub struct ChainStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockEntry {
     pub hash: String,
-    pub header_unpacked: HeaderUnpacked,
+    pub header: Header,
     pub tx_count: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub consensus: Option<Consensus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HeaderUnpacked {
+pub struct Header {
     pub slot: u64,
     pub height: u64,
     pub dr: String,
     pub vr: String,
     pub prev_hash: String,
     pub signer: String,
+    pub root_tx: String,
+    pub root_validator: String,
     pub prev_slot: u64,
 }
 
@@ -223,8 +225,13 @@ pub struct ValidatorsQuery {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidatorInfo {
-    pub public_key: String,
-    pub score: Option<f64>,
-    pub epoch: Option<u64>,
-    pub rank: Option<u32>,
+    pub version: String,
+    pub pk: String,
+    pub latency: u64,
+    pub slot_speed: u64,
+    pub is_trainer: bool,
+    pub temporal_height: u64,
+    pub rooted_hash: String,
+    pub rooted_height: u64,
+    pub temporal_hash: String,
 }

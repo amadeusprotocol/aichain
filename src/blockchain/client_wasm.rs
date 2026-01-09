@@ -185,7 +185,7 @@ impl BlockchainClient {
             .map_err(|e| BlockchainError::InvalidResponse(e.to_string()))
     }
 
-    pub async fn get_validators(&self, url: &str) -> Result<Vec<String>> {
+    pub async fn get_validators(&self, url: &str) -> Result<Vec<ValidatorInfo>> {
         let resp: serde_json::Value = self.request_with_url(url, "GET", "/api/peer/trainers", None).await?;
 
         let trainers = resp

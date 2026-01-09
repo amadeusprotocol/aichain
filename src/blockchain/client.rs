@@ -222,7 +222,7 @@ impl BlockchainClient {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_validators(&self, url: &str) -> Result<Vec<String>> {
+    pub async fn get_validators(&self, url: &str) -> Result<Vec<ValidatorInfo>> {
         let response = self
             .retry_request_with_url(url, "GET", "/api/peer/trainers", None)
             .await?;
